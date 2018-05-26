@@ -5,6 +5,7 @@
 
 #include <cstdio>
 #include <string>
+#include <iostream>
 
 #include "rocksdb/db.h"
 #include "rocksdb/slice.h"
@@ -18,8 +19,8 @@ int main() {
   DB* db;
   Options options;
   // Optimize RocksDB. This is the easiest way to get RocksDB to perform well
-  options.IncreaseParallelism();
-  options.OptimizeLevelStyleCompaction();
+  //options.IncreaseParallelism();
+  //options.OptimizeLevelStyleCompaction();
   // create the DB if it's not already present
   options.create_if_missing = true;
 
@@ -31,6 +32,28 @@ int main() {
   s = db->Put(WriteOptions(), "key1", "value");
   assert(s.ok());
   std::string value;
+
+	/*
+  long si = 256*1024*1024;
+  char *nv = new char[si];
+  memset(nv, '8', si);
+  s = db->Put(WriteOptions(), "key5", nv);
+	*/
+
+	long count = 1024*4, si=1024*128;
+	char *nv = new char[si];
+	memset(nv, '8', si);
+	for(long i=0; i<count; i++) {
+		std::string k="kk"+std::to_string(i);
+		int lth = k.length();
+		s = db->Put(WriteOptions(), k, nv);
+		
+	}
+
+
+
+  //s = db->Get(ReadOptions(), "key3", &value);
+  //std::cout<<value<<"\n";
   // get value
   s = db->Get(ReadOptions(), "key1", &value);
   assert(s.ok());
