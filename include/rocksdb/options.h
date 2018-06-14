@@ -1270,6 +1270,9 @@ struct IngestExternalFileOptions {
   bool ingest_behind = false;
 };
 
+struct TraceOptions {};
+struct ReplayOptions {};
+
 }  // namespace rocksdb
 
 #endif  // STORAGE_ROCKSDB_INCLUDE_OPTIONS_H_
