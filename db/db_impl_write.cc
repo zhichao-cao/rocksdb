@@ -75,6 +75,9 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
   if (my_batch == nullptr) {
     return Status::Corruption("Batch is nullptr!");
   }
+  if (tracer_) {
+    tracer_->TraceWrite(my_batch);
+  }
   if (write_options.sync && write_options.disableWAL) {
     return Status::InvalidArgument("Sync writes has to enable WAL.");
   }
@@ -211,7 +214,6 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
   // and protects against concurrent loggers and concurrent writes
   // into memtables
 
-  TEST_SYNC_POINT("DBImpl::WriteImpl:BeforeLeaderEnters");
   last_batch_group_size_ =
       write_thread_.EnterAsBatchGroupLeader(&w, &write_group);
 
@@ -1281,11 +1283,7 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context,
   // In case of pipelined write is enabled, wait for all pending memtable
   // writers.
   if (immutable_db_options_.enable_pipelined_write) {
-    // Memtable writers may call DB::Get in case max_successive_merges > 0,
-    // which may lock mutex. Unlocking mutex here to avoid deadlock.
-    mutex_.Unlock();
     write_thread_.WaitForMemTableWriters();
-    mutex_.Lock();
   }
 
   // Attempt to switch to a new memtable and trigger flush of old.

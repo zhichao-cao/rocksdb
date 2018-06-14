@@ -718,11 +718,6 @@ Status DBImpl::FlushWAL(bool sync) {
     if (!s.ok()) {
       ROCKS_LOG_ERROR(immutable_db_options_.info_log, "WAL flush error %s",
                       s.ToString().c_str());
-      // In case there is a fs error we should set it globally to prevent the
-      // future writes
-      WriteStatusCheck(s);
-      // whether sync or not, we should abort the rest of function upon error
-      return s;
     }
     if (!sync) {
       ROCKS_LOG_DEBUG(immutable_db_options_.info_log, "FlushWAL sync=false");
@@ -810,8 +805,6 @@ void DBImpl::MarkLogsSynced(uint64_t up_to, bool synced_dir,
     assert(log.getting_synced);
     if (status.ok() && logs_.size() > 1) {
       logs_to_free_.push_back(log.ReleaseWriter());
-      // To modify logs_ both mutex_ and log_write_mutex_ must be held
-      InstrumentedMutexLock l(&log_write_mutex_);
       it = logs_.erase(it);
     } else {
       log.getting_synced = false;
@@ -969,7 +962,7 @@ InternalIterator* DBImpl::NewInternalIterator(
   MergeIteratorBuilder merge_iter_builder(
       &cfd->internal_comparator(), arena,
       !read_options.total_order_seek &&
-          super_version->mutable_cf_options.prefix_extractor != nullptr);
+          cfd->ioptions()->prefix_extractor != nullptr);
   // Collect iterator for mutable mem
   merge_iter_builder.AddIterator(
       super_version->mem->NewIterator(read_options, arena));
@@ -1028,6 +1021,10 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
 
   auto cfh = reinterpret_cast<ColumnFamilyHandleImpl*>(column_family);
   auto cfd = cfh->cfd();
+
+  if (tracer_) {
+    tracer_->TraceGet(key);
+  }
 
   // Acquire SuperVersion
   SuperVersion* sv = GetAndRefSuperVersion(cfd);
@@ -1568,11 +1565,11 @@ Iterator* DBImpl::NewIterator(const ReadOptions& read_options,
 #else
     SuperVersion* sv = cfd->GetReferencedSuperVersion(&mutex_);
     auto iter = new ForwardIterator(this, read_options, cfd, sv);
-    result = NewDBIterator(
-        env_, read_options, *cfd->ioptions(), sv->mutable_cf_options,
-        cfd->user_comparator(), iter, kMaxSequenceNumber,
-        sv->mutable_cf_options.max_sequential_skip_in_iterations,
-        read_callback);
+    result =
+        NewDBIterator(env_, read_options, *cfd->ioptions(),
+                      cfd->user_comparator(), iter, kMaxSequenceNumber,
+                      sv->mutable_cf_options.max_sequential_skip_in_iterations,
+                      read_callback);
 #endif
   } else {
     // Note: no need to consider the special case of
@@ -1637,7 +1634,7 @@ ArenaWrappedDBIter* DBImpl::NewIteratorImpl(const ReadOptions& read_options,
   // likely that any iterator pointer is close to the iterator it points to so
   // that they are likely to be in the same cache line and/or page.
   ArenaWrappedDBIter* db_iter = NewArenaWrappedDbIterator(
-      env_, read_options, *cfd->ioptions(), sv->mutable_cf_options, snapshot,
+      env_, read_options, *cfd->ioptions(), snapshot,
       sv->mutable_cf_options.max_sequential_skip_in_iterations,
       sv->version_number, read_callback,
       ((read_options.snapshot != nullptr) ? nullptr : this), cfd, allow_blob,
@@ -1688,8 +1685,8 @@ Status DBImpl::NewIterators(
       SuperVersion* sv = cfd->GetReferencedSuperVersion(&mutex_);
       auto iter = new ForwardIterator(this, read_options, cfd, sv);
       iterators->push_back(NewDBIterator(
-          env_, read_options, *cfd->ioptions(), sv->mutable_cf_options,
-          cfd->user_comparator(), iter, kMaxSequenceNumber,
+          env_, read_options, *cfd->ioptions(), cfd->user_comparator(), iter,
+          kMaxSequenceNumber,
           sv->mutable_cf_options.max_sequential_skip_in_iterations,
           read_callback));
     }
@@ -2863,9 +2860,7 @@ Status DBImpl::IngestExternalFile(
     pending_output_elem = CaptureCurrentFileNumberInPendingOutputs();
   }
 
-  SuperVersion* super_version = cfd->GetReferencedSuperVersion(&mutex_);
-  status = ingestion_job.Prepare(external_files, super_version);
-  CleanupSuperVersion(super_version);
+  status = ingestion_job.Prepare(external_files);
   if (!status.ok()) {
     return status;
   }
@@ -3034,6 +3029,53 @@ void DBImpl::WaitForIngestFile() {
   while (num_running_ingest_file_ > 0) {
     bg_cv_.Wait();
   }
+}
+
+Status DBImpl::StartTrace(const TraceOptions& /* options */,
+                          const std::string& trace_filename) {
+  EnvOptions env_options;
+  unique_ptr<WritableFile> trace_file;
+  Status s = env_->NewWritableFile(trace_filename, &trace_file, env_options);
+  if (s.ok()) {
+    unique_ptr<WritableFileWriter> file_writer;
+    file_writer.reset(
+        new WritableFileWriter(std::move(trace_file), env_options));
+    unique_ptr<TraceWriter> trace_writer;
+    trace_writer.reset(new TraceWriter(env_, std::move(file_writer)));
+
+    tracer_.reset(new Tracer(env_, std::move(trace_writer)));
+    return Status::OK();
+  }
+  return s;
+}
+
+Status DBImpl::EndTrace(const TraceOptions& /* options */) {
+  Status s = tracer_->Close();
+  tracer_.reset();
+  return s;
+}
+
+Status DBImpl::StartReplay(const ReplayOptions& /* options */,
+                           const std::string& trace_filename) {
+  EnvOptions env_options;
+  unique_ptr<RandomAccessFile> trace_file;
+  Status s =
+      env_->NewRandomAccessFile(trace_filename, &trace_file, env_options);
+  if (s.ok()) {
+    unique_ptr<RandomAccessFileReader> trace_file_reader;
+    trace_file_reader.reset(
+        new RandomAccessFileReader(std::move(trace_file), trace_filename));
+    unique_ptr<TraceReader> trace_reader;
+    trace_reader.reset(new TraceReader(std::move(trace_file_reader)));
+    replayer_.reset(new Replayer(this, std::move(trace_reader)));
+    return Status::OK();
+  }
+  return s;
+}
+
+Status DBImpl::EndReplay(const ReplayOptions& /* options */) {
+  replayer_.reset();
+  return Status::OK();
 }
 
 #endif  // ROCKSDB_LITE
