@@ -3058,12 +3058,12 @@ void DBImpl::WaitForIngestFile() {
   }
 }
 
-
-
 Status DBImpl::StartTrace(const TraceOptions& /* options */,
-                          const std::string& trace_filename) {
+                          const std::string& old_trace_filename) {
   EnvOptions env_options;
   unique_ptr<WritableFile> trace_file;
+  std::string trace_filename =
+      old_trace_filename + "." + std::to_string(env_->NowMicros());
   Status s = env_->NewWritableFile(trace_filename, &trace_file, env_options);
   if (s.ok()) {
     unique_ptr<WritableFileWriter> file_writer;
