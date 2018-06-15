@@ -4,12 +4,12 @@
 //  (found in the LICENSE.Apache file in the root directory).
 
 #include <cstdio>
-#include <string>
 #include <iostream>
+#include <string>
 
 #include "rocksdb/db.h"
-#include "rocksdb/slice.h"
 #include "rocksdb/options.h"
+#include "rocksdb/slice.h"
 
 using namespace rocksdb;
 
@@ -23,28 +23,31 @@ int main() {
   options.OptimizeLevelStyleCompaction();
   // create the DB if it's not already present
   options.create_if_missing = true;
+  TraceOptions trace_opt;
 
   // open DB
   Status s = DB::Open(options, kDBPath, &db);
   assert(s.ok());
+  db->StartTrace(trace_opt, kDBPath + "/rocksdb.trace");
 
   // Put key-value
   s = db->Put(WriteOptions(), "key1", "value");
   assert(s.ok());
   std::string value;
 
-  //large data put
-  long count = 1024*4, si=1024*128;
-  char *nv = new char[si];
+  // large data put
+  long count = 1024 * 128, si = 1024;
+  char* nv = new char[si];
   memset(nv, '8', si);
-  for(long i=0; i<count; i++) {
-    std::string k="kk"+std::to_string(i);
+  for (long i = 0; i < count; i++) {
+    std::string k = "kkk" + std::to_string(i);
     int lth = k.length();
     s = db->Put(WriteOptions(), k, nv);
   }
-  long total = count*si;
-  std::cout<<"total write: "<<total<<" Value size:"<<si<<" Count: "<<count<<"\n";
-
+  long total = count * si;
+  std::cout << "total write: " << total << " Value size:" << si
+            << " Count: " << count << "\n";
+  db->EndTrace(trace_opt);
   // get value
   s = db->Get(ReadOptions(), "key1", &value);
   assert(s.ok());
