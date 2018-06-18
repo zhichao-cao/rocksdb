@@ -35,6 +35,11 @@ Status DBImplReadOnly::Get(const ReadOptions& read_options,
   SequenceNumber snapshot = versions_->LastSequence();
   auto cfh = reinterpret_cast<ColumnFamilyHandleImpl*>(column_family);
   auto cfd = cfh->cfd();
+  if (tracer_.get() == nullptr) {
+    TraceOptions trace_opts;
+    std::string trace_filename = "/tmp/trace/trace";
+    StartTrace(trace_opts, trace_filename);
+  }
   if (tracer_) {
     tracer_->TraceGet(key);
   }
