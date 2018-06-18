@@ -1,5 +1,6 @@
 set(TOOLS
   sst_dump.cc
+  trace_analyzer.cc
   db_sanity_test.cc
   db_stress.cc
   write_stress.cc
