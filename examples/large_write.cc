@@ -28,7 +28,8 @@ int main() {
   // open DB
   Status s = DB::Open(options, kDBPath, &db);
   assert(s.ok());
-  db->StartTrace(trace_opt, kDBPath + "/rocksdb.trace");
+
+  // db->StartTrace(trace_opt, kDBPath + "/rocksdb.trace");
 
   // Put key-value
   s = db->Put(WriteOptions(), "key1", "value");
@@ -54,7 +55,7 @@ int main() {
   }
   std::cout << "total write: " << total << " Value size:" << si
             << "write Count: " << count << " Get count: " << get_count << "\n";
-  db->EndTrace(trace_opt);
+  // db->EndTrace(trace_opt);
   // get value
   s = db->Get(ReadOptions(), "key1", &value);
   assert(s.ok());
