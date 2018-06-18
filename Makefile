@@ -555,6 +555,7 @@ endif
 
 TOOLS = \
 	sst_dump \
+	trace_analyzer \
 	db_sanity_test \
 	db_stress \
 	write_stress \
@@ -1481,6 +1482,9 @@ write_unprepared_transaction_test: utilities/transactions/write_unprepared_trans
 
 sst_dump: tools/sst_dump.o $(LIBOBJECTS)
 	$(AM_LINK)
+
+trace_analyzer: tools/trace_analyzer.o $(LIBOBJECTS)
+	        $(AM_LINK)
 
 blob_dump: tools/blob_dump.o $(LIBOBJECTS)
 	$(AM_LINK)
