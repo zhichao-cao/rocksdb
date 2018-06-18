@@ -45,8 +45,15 @@ int main() {
     s = db->Put(WriteOptions(), k, nv);
   }
   long total = count * si;
+
+  long get_count = 1024 * 64;
+  for (long i = 0; i < get_count; i++) {
+    std::string k = "kkk" + std::to_string(i);
+    int lth = k.length();
+    s = db->Get(ReadOptions(), k, &value);
+  }
   std::cout << "total write: " << total << " Value size:" << si
-            << " Count: " << count << "\n";
+            << "write Count: " << count << " Get count: " << get_count << "\n";
   db->EndTrace(trace_opt);
   // get value
   s = db->Get(ReadOptions(), "key1", &value);
