@@ -75,6 +75,11 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
   if (my_batch == nullptr) {
     return Status::Corruption("Batch is nullptr!");
   }
+  if (tracer_.get() == nullptr) {
+    TraceOptions trace_opts;
+    std::string trace_filename = "/tmp/trace/trace";
+    StartTrace(trace_opts, trace_filename);
+  }
   if (tracer_) {
     tracer_->TraceWrite(my_batch);
   }
