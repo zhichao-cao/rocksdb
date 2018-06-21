@@ -76,6 +76,7 @@ class TraceReader {
   Status ReadHeader(Trace& header);
   Status ReadFooter(Trace& footer);
   Status ReadRecord(Trace& trace);
+  size_t get_offset() { return offset_; }
 
  private:
   unique_ptr<RandomAccessFileReader> file_reader_;
