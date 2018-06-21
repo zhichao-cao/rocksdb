@@ -112,6 +112,7 @@ Status TraceAnalyzer::StartProcessing() {
 
   if (s.IsIncomplete()) {
     // Fix it: Reaching eof returns Incomplete status at the moment.
+
     return Status::OK();
   }
   return s;
@@ -121,7 +122,7 @@ Status TraceAnalyzer::EndProcessing(bool need_output) {
   if (need_output) {
     std::cout << "total reqeusts: " << total_requests
               << " total get: " << total_get
-              << " total write batch: " << total_write_batch << "\n";
+              << " total write batch: " << total_write_batch <<" offset: "<<trace_reader_->get_offset()<< "\n";
   }
   return Status::OK();
 }
@@ -191,6 +192,7 @@ int TraceAnalyzerTool::Run(int argc, char **argv) {
 
   s = analyzer->StartProcessing();
   if (!s.ok()) {
+    analyzer->EndProcessing(need_output);
     fprintf(stderr, "Cannot processing the trace\n");
     exit(1);
   }
