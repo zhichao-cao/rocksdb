@@ -47,9 +47,9 @@ void Java_org_rocksdb_Transaction_setSnapshotOnNextOperation__JJ(
     JNIEnv* /*env*/, jobject /*jobj*/, jlong jhandle,
     jlong jtxn_notifier_handle) {
   auto* txn = reinterpret_cast<rocksdb::Transaction*>(jhandle);
-  auto* txn_notifier =
-      reinterpret_cast<std::shared_ptr<rocksdb::TransactionNotifierJniCallback>*>(
-          jtxn_notifier_handle);
+  auto* txn_notifier = reinterpret_cast<
+      std::shared_ptr<rocksdb::TransactionNotifierJniCallback>*>(
+      jtxn_notifier_handle);
   txn->SetSnapshotOnNextOperation(*txn_notifier);
 }
 
@@ -182,8 +182,9 @@ jbyteArray txn_get_helper(JNIEnv* env, const FnGet& fn_get,
       // exception thrown: OutOfMemoryError
       return nullptr;
     }
-    env->SetByteArrayRegion(jret_value, 0, static_cast<jsize>(value.size()),
-                            const_cast<jbyte*>(reinterpret_cast<const jbyte*>(value.c_str())));
+    env->SetByteArrayRegion(
+        jret_value, 0, static_cast<jsize>(value.size()),
+        const_cast<jbyte*>(reinterpret_cast<const jbyte*>(value.c_str())));
     if (env->ExceptionCheck()) {
       // exception thrown: ArrayIndexOutOfBoundsException
       return nullptr;
@@ -350,7 +351,8 @@ jobjectArray txn_multi_get_helper(JNIEnv* env, const FnMultiGet& fn_multi_get,
 
       env->SetByteArrayRegion(
           jentry_value, 0, static_cast<jsize>(value_parts[i].size()),
-          const_cast<jbyte*>(reinterpret_cast<const jbyte*>(value_parts[i].c_str())));
+          const_cast<jbyte*>(
+              reinterpret_cast<const jbyte*>(value_parts[i].c_str())));
       if (env->ExceptionCheck()) {
         // exception thrown: ArrayIndexOutOfBoundsException
         env->DeleteLocalRef(jentry_value);

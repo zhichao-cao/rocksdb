@@ -329,7 +329,6 @@ class DBImpl : public DB {
 
   virtual Status VerifyChecksum() override;
 
-
   using DB::StartTrace;
   virtual Status StartTrace(const TraceOptions& options,
                             const std::string& trace_filename) override;
@@ -343,9 +342,6 @@ class DBImpl : public DB {
 
   using DB::EndReplay;
   virtual Status EndReplay(const ReplayOptions& options) override;
-
-
-
 
 #endif  // ROCKSDB_LITE
 
@@ -669,6 +665,7 @@ class DBImpl : public DB {
   bool own_info_log_;
   const DBOptions initial_db_options_;
   const ImmutableDBOptions immutable_db_options_;
+  mutable InstrumentedMutex trace_mutex_;
   MutableDBOptions mutable_db_options_;
   Statistics* stats_;
   std::unordered_map<std::string, RecoveredTransaction*>

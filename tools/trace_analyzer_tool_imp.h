@@ -9,8 +9,8 @@
 #include "rocksdb/trace_analyzer_tool.h"
 
 #include <list>
-#include <utility>
 #include <map>
+#include <utility>
 
 #include "rocksdb/env.h"
 #include "util/trace_replay.h"
@@ -47,8 +47,8 @@ class AnalyzerOptions {
 
 class TraceAnalyzer {
  public:
-  TraceAnalyzer(std::string &trace_path, std::string &output_path, bool need_output,
-                AnalyzerOptions _analyzer_opts);
+  TraceAnalyzer(std::string &trace_path, std::string &output_path,
+                bool need_output, AnalyzerOptions _analyzer_opts);
   ~TraceAnalyzer();
 
   Status PrepareProcessing();
@@ -76,26 +76,23 @@ class TraceAnalyzer {
   std::map<std::string, TraceUnit> trace_map_;
 
   Status TraceMapInsertion(TraceUnit &unit);
-
-
 };
 
 class TraceOutputWriter {
-public:
-  TraceOutputWriter(Env* env, std::unique_ptr<WritableFileWriter>&& file_writer)
-          : env_(env), file_writer_(std::move(file_writer)) {}
+ public:
+  TraceOutputWriter(Env *env, std::unique_ptr<WritableFileWriter> &&file_writer)
+      : env_(env), file_writer_(std::move(file_writer)) {}
   ~TraceOutputWriter();
 
   Status WriteHeader();
   Status WriteFooter();
   Status WriteTraceUnit(TraceUnit &unit);
   std::string MicrosdToDate(uint64_t time);
-  std::string StringToHex(const std::string& input);
+  std::string StringToHex(const std::string &input);
 
-  private:
-  Env* env_;
+ private:
+  Env *env_;
   unique_ptr<WritableFileWriter> file_writer_;
-
 };
 
 }  // namespace rocksdb
