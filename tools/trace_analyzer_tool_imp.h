@@ -10,6 +10,7 @@
 
 #include <list>
 #include <utility>
+#include <map>
 
 #include "rocksdb/env.h"
 #include "util/trace_replay.h"
@@ -20,12 +21,15 @@ class DBImpl;
 class WriteBatch;
 class AnalyzerOptions;
 class TraceAnalyzer;
+class TraceOutputWriter;
 
 struct TraceUnit {
-  std::string type;
+  int type;
   std::string key;
   uint64_t value_size;
   uint64_t ts;
+  uint64_t uid;
+  uint64_t access_count;
 };
 
 class AnalyzerOptions {
@@ -43,7 +47,7 @@ class AnalyzerOptions {
 
 class TraceAnalyzer {
  public:
-  TraceAnalyzer(std::string &trace_path, std::string &output_path,
+  TraceAnalyzer(std::string &trace_path, std::string &output_path, bool need_output,
                 AnalyzerOptions _analyzer_opts);
   ~TraceAnalyzer();
 
@@ -51,7 +55,7 @@ class TraceAnalyzer {
 
   Status StartProcessing();
 
-  Status EndProcessing(bool need_output);
+  Status EndProcessing();
 
   uint64_t total_requests;
   uint64_t total_keys;
@@ -61,11 +65,37 @@ class TraceAnalyzer {
  private:
   Env *env_;
   unique_ptr<rocksdb::TraceReader> trace_reader_;
+  unique_ptr<rocksdb::TraceOutputWriter> trace_output_writer_;
   size_t offset_;
   char *buffer_;
+  uint64_t guid_;
   std::string trace_name_;
   std::string output_name_;
-  AnalyzerOptions analyzer_opts;
+  bool need_output_;
+  AnalyzerOptions analyzer_opts_;
+  std::map<std::string, TraceUnit> trace_map_;
+
+  Status TraceMapInsertion(TraceUnit &unit);
+
+
+};
+
+class TraceOutputWriter {
+public:
+  TraceOutputWriter(Env* env, std::unique_ptr<WritableFileWriter>&& file_writer)
+          : env_(env), file_writer_(std::move(file_writer)) {}
+  ~TraceOutputWriter();
+
+  Status WriteHeader();
+  Status WriteFooter();
+  Status WriteTraceUnit(TraceUnit &unit);
+  std::string MicrosdToDate(uint64_t time);
+  std::string StringToHex(const std::string& input);
+
+  private:
+  Env* env_;
+  unique_ptr<WritableFileWriter> file_writer_;
+
 };
 
 }  // namespace rocksdb
