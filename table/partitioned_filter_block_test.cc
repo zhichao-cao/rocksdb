@@ -303,8 +303,8 @@ TEST_F(PartitionedFilterBlockTest, TwoBlocksPerKey) {
 TEST_F(PartitionedFilterBlockTest, SamePrefixInMultipleBlocks) {
   // some small number to cause partition cuts
   table_options_.metadata_block_size = 1;
-  std::unique_ptr<const SliceTransform> prefix_extractor
-      (rocksdb::NewFixedPrefixTransform(1));
+  std::unique_ptr<const SliceTransform> prefix_extractor(
+      rocksdb::NewFixedPrefixTransform(1));
   std::unique_ptr<PartitionedIndexBuilder> pib(NewIndexBuilder());
   std::unique_ptr<PartitionedFilterBlockBuilder> builder(
       NewBuilder(pib.get(), prefix_extractor.get()));

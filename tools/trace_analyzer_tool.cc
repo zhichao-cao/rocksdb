@@ -8,12 +8,12 @@
 #include "tools/trace_analyzer_tool_imp.h"
 
 #include <inttypes.h>
+#include <time.h>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <sstream>
 #include <vector>
-#include <time.h>
 
 #include "db/db_impl.h"
 #include "db/memtable.h"
@@ -47,40 +47,38 @@ Status TraceOutputWriter::WriteFooter() { return Status::OK(); }
 Status TraceOutputWriter::WriteTraceUnit(TraceUnit &unit) {
   Status s;
   std::ostringstream out_format;
-  out_format << unit.type << "\t" << unit.uid << "\t" << unit.access_count << "\t"
-    << unit.value_size << "\t" << unit.key.size() << "\t"
-    << MicrosdToDate(unit.ts) << "\t" << StringToHex(unit.key) << "\n";
+  out_format << unit.type << "\t" << unit.uid << "\t" << unit.access_count
+             << "\t" << unit.value_size << "\t" << unit.key.size() << "\t"
+             << MicrosdToDate(unit.ts) << "\t" << StringToHex(unit.key) << "\n";
   std::string content(out_format.str());
+  std::cout << content;
 
   s = file_writer_->Append(Slice(content));
   return s;
 }
 
 std::string TraceOutputWriter::MicrosdToDate(uint64_t time_in) {
-  time_t tx = static_cast<time_t>(time_in/1000000);
-  int rest = static_cast<int>(time_in%1000000);
+  time_t tx = static_cast<time_t>(time_in / 1000000);
+  int rest = static_cast<int>(time_in % 1000000);
   std::string date_time(ctime(&tx));
   date_time.pop_back();
-  date_time += " +: "+std::to_string(rest);
+  date_time += " +: " + std::to_string(rest);
   return date_time;
 }
 
-std::string TraceOutputWriter::StringToHex(const std::string& input)
-{
-    static const char* const lut = "0123456789ABCDEF";
-    size_t len = input.length();
+std::string TraceOutputWriter::StringToHex(const std::string &input) {
+  static const char *const lut = "0123456789ABCDEF";
+  size_t len = input.length();
 
-    std::string output;
-    output.reserve(2 * len);
-    for (size_t i = 0; i < len; ++i) {
-        const unsigned char c = input[i];
-        output.push_back(lut[c >> 4]);
-        output.push_back(lut[c & 15]);
-    }
-    return output;
+  std::string output;
+  output.reserve(2 * len);
+  for (size_t i = 0; i < len; ++i) {
+    const unsigned char c = input[i];
+    output.push_back(lut[c >> 4]);
+    output.push_back(lut[c & 15]);
+  }
+  return output;
 }
-
-
 
 AnalyzerOptions::AnalyzerOptions(bool _use_get, bool _use_put, bool _use_delete,
                                  bool _use_merge) {
@@ -92,9 +90,8 @@ AnalyzerOptions::AnalyzerOptions(bool _use_get, bool _use_put, bool _use_delete,
 
 AnalyzerOptions::~AnalyzerOptions() {}
 
-
 TraceAnalyzer::TraceAnalyzer(std::string &trace_path, std::string &output_path,
-                            bool need_output, AnalyzerOptions _analyzer_opts)
+                             bool need_output, AnalyzerOptions _analyzer_opts)
     : trace_name_(trace_path),
       output_name_(output_path),
       need_output_(need_output),
@@ -116,15 +113,14 @@ Status TraceAnalyzer::PrepareProcessing() {
   env_ = env;
   Status s;
 
-
   unique_ptr<rocksdb::RandomAccessFile> trace_file;
   s = env_->NewRandomAccessFile(trace_name_, &trace_file, env_options);
   if (!s.ok()) {
     return s;
   }
   unique_ptr<rocksdb::RandomAccessFileReader> trace_file_reader;
-  trace_file_reader.reset(new rocksdb::RandomAccessFileReader(
-      std::move(trace_file), trace_name_));
+  trace_file_reader.reset(
+      new rocksdb::RandomAccessFileReader(std::move(trace_file), trace_name_));
   trace_reader_.reset(new rocksdb::TraceReader(std::move(trace_file_reader)));
 
   if (!need_output_) {
@@ -137,8 +133,10 @@ Status TraceAnalyzer::PrepareProcessing() {
     return s;
   }
   unique_ptr<WritableFileWriter> output_file_writer;
-  output_file_writer.reset(new WritableFileWriter(std::move(output_file), env_options));
-  trace_output_writer_.reset(new TraceOutputWriter(env_, std::move(output_file_writer)));
+  output_file_writer.reset(
+      new WritableFileWriter(std::move(output_file), env_options));
+  trace_output_writer_.reset(
+      new TraceOutputWriter(env_, std::move(output_file_writer)));
 
   return Status::OK();
 }
@@ -178,8 +176,7 @@ Status TraceAnalyzer::StartProcessing() {
       unit.uid = 0;
       unit.access_count = 0;
       s = TraceMapInsertion(unit);
-      std::cout<<trace_reader_->get_offset() << "\n";
-      if(!s.ok()) {
+      if (!s.ok()) {
         fprintf(stderr, "Cannot insert the trace unit to the map\n");
       }
     }
@@ -198,8 +195,9 @@ Status TraceAnalyzer::EndProcessing() {
   if (need_output_) {
     std::cout << "total reqeusts: " << total_requests
               << " total get: " << total_get
-              << " total write batch: " << total_write_batch <<" offset: "<<trace_reader_->get_offset()<< "\n";
-    for(auto it = trace_map_.begin(); it != trace_map_.end(); it++) {
+              << " total write batch: " << total_write_batch
+              << " offset: " << trace_reader_->get_offset() << "\n";
+    for (auto it = trace_map_.begin(); it != trace_map_.end(); it++) {
       trace_output_writer_->WriteTraceUnit(it->second);
     }
   }
@@ -220,7 +218,6 @@ Status TraceAnalyzer::TraceMapInsertion(TraceUnit &unit) {
   }
   return Status::OK();
 }
-
 
 namespace {
 
