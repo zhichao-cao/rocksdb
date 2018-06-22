@@ -1567,8 +1567,7 @@ InternalIterator* BlockBasedTable::NewIndexIterator(
 BlockIter* BlockBasedTable::NewDataBlockIterator(
     Rep* rep, const ReadOptions& ro, const Slice& index_value,
     BlockIter* input_iter, bool is_index, bool key_includes_seq,
-    GetContext* get_context,
-    FilePrefetchBuffer* prefetch_buffer) {
+    GetContext* get_context, FilePrefetchBuffer* prefetch_buffer) {
   BlockHandle handle;
   Slice input = index_value;
   // We intentionally allow extra stuff in index_value so that we
@@ -2060,11 +2059,10 @@ void BlockBasedTableIterator::InitDataBlock() {
       }
     }
 
-    BlockBasedTable::NewDataBlockIterator(rep, read_options_, data_block_handle,
-                                          &data_block_iter_, is_index_,
-                                          key_includes_seq_,
-                                          /* get_context */ nullptr, s,
-                                          prefetch_buffer_.get());
+    BlockBasedTable::NewDataBlockIterator(
+        rep, read_options_, data_block_handle, &data_block_iter_, is_index_,
+        key_includes_seq_,
+        /* get_context */ nullptr, s, prefetch_buffer_.get());
     block_iter_points_to_real_block_ = true;
   }
 }
