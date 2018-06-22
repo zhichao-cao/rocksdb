@@ -1032,7 +1032,7 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
   trace_mutex_.Lock();
   if (tracer_.get() == nullptr) {
     TraceOptions trace_opts;
-    std::string trace_filename = "/tmp/trace/trace";
+    std::string trace_filename = "/data/trace/trace";
     StartTrace(trace_opts, trace_filename);
   }
   if (tracer_) {
