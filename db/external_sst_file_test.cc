@@ -899,10 +899,10 @@ TEST_F(ExternalSSTFileTest, OverlappingRanges) {
   Random rnd(301);
   SequenceNumber assigned_seqno = 0;
   rocksdb::SyncPoint::GetInstance()->SetCallBack(
-    "ExternalSstFileIngestionJob::Run", [&assigned_seqno](void* arg) {
-      ASSERT_TRUE(arg != nullptr);
-      assigned_seqno = *(static_cast<SequenceNumber*>(arg));
-    });
+      "ExternalSstFileIngestionJob::Run", [&assigned_seqno](void* arg) {
+        ASSERT_TRUE(arg != nullptr);
+        assigned_seqno = *(static_cast<SequenceNumber*>(arg));
+      });
   bool need_flush = false;
   rocksdb::SyncPoint::GetInstance()->SetCallBack(
     "DBImpl::IngestExternalFile:NeedFlush", [&need_flush](void* arg) {
