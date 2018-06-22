@@ -61,7 +61,7 @@ public class Environment {
       final String arch = is64Bit() ? "64" : "32";
       if(isPowerPC()) {
         return String.format("%sjni-linux-%s", name, ARCH);
-      } else if(isS390x()) {
+      } else if (isS390x()) {
         return String.format("%sjni-linux%s", name, ARCH);
       } else {
         return String.format("%sjni-linux%s", name, arch);

@@ -42,26 +42,26 @@ Status Checkpoint::CreateCheckpoint(const std::string& /*checkpoint_dir*/,
   return Status::NotSupported("");
 }
 
-void CheckpointImpl::CleanStagingDirectory(
-    const std::string& full_private_path, Logger* info_log) {
-    std::vector<std::string> subchildren;
+void CheckpointImpl::CleanStagingDirectory(const std::string& full_private_path,
+                                           Logger* info_log) {
+  std::vector<std::string> subchildren;
   Status s = db_->GetEnv()->FileExists(full_private_path);
   if (s.IsNotFound()) {
     return;
   }
-  ROCKS_LOG_INFO(info_log, "File exists %s -- %s",
-                 full_private_path.c_str(), s.ToString().c_str());
+  ROCKS_LOG_INFO(info_log, "File exists %s -- %s", full_private_path.c_str(),
+                 s.ToString().c_str());
   db_->GetEnv()->GetChildren(full_private_path, &subchildren);
   for (auto& subchild : subchildren) {
     std::string subchild_path = full_private_path + "/" + subchild;
     s = db_->GetEnv()->DeleteFile(subchild_path);
-    ROCKS_LOG_INFO(info_log, "Delete file %s -- %s",
-                   subchild_path.c_str(), s.ToString().c_str());
+    ROCKS_LOG_INFO(info_log, "Delete file %s -- %s", subchild_path.c_str(),
+                   s.ToString().c_str());
   }
   // finally delete the private dir
   s = db_->GetEnv()->DeleteDir(full_private_path);
-  ROCKS_LOG_INFO(info_log, "Delete dir %s -- %s",
-                 full_private_path.c_str(), s.ToString().c_str());
+  ROCKS_LOG_INFO(info_log, "Delete dir %s -- %s", full_private_path.c_str(),
+                 s.ToString().c_str());
 }
 
 // Builds an openable snapshot of RocksDB
