@@ -14,6 +14,7 @@
 #include <memory>
 #include <sstream>
 #include <vector>
+#include <stdexcept>
 
 #include "db/db_impl.h"
 #include "db/memtable.h"
@@ -47,7 +48,8 @@ Status TraceOutputWriter::WriteFooter() { return Status::OK(); }
 Status TraceOutputWriter::WriteTraceUnit(TraceUnit &unit) {
   Status s;
   std::ostringstream out_format;
-  out_format << unit.type << "\t" << unit.uid << "\t" << unit.access_count
+  out_format << unit.type << "\t" << unit.uid << "\t" << unit.key_id << "\t"
+            << unit.access_count
              << "\t" << unit.value_size << "\t" << unit.key.size() << "\t"
              << MicrosdToDate(unit.ts) << "\t" << StringToHex(unit.key) << "\n";
   std::string content(out_format.str());
@@ -80,12 +82,13 @@ std::string TraceOutputWriter::StringToHex(const std::string &input) {
   return output;
 }
 
-AnalyzerOptions::AnalyzerOptions(bool _use_get, bool _use_put, bool _use_delete,
-                                 bool _use_merge) {
-  use_get = _use_get;
-  use_put = _use_put;
-  use_delete = _use_delete;
-  use_merge = _use_merge;
+AnalyzerOptions::AnalyzerOptions() {
+  use_get = true;
+  use_put = false;
+  use_delete = false;
+  use_merge = false;
+  print_stats = false;
+  output_ignore_count = 0;
 }
 
 AnalyzerOptions::~AnalyzerOptions() {}
@@ -174,6 +177,7 @@ Status TraceAnalyzer::StartProcessing() {
       unit.ts = trace.ts;
       unit.value_size = 0;
       unit.uid = 0;
+      unit.key_id = 0;
       unit.access_count = 0;
       s = TraceMapInsertion(unit);
       if (!s.ok()) {
@@ -192,14 +196,35 @@ Status TraceAnalyzer::StartProcessing() {
 }
 
 Status TraceAnalyzer::EndProcessing() {
-  if (need_output_) {
-    std::cout << "total reqeusts: " << total_requests
-              << " total get: " << total_get
-              << " total write batch: " << total_write_batch
-              << " offset: " << trace_reader_->get_offset() << "\n";
-    for (auto it = trace_map_.begin(); it != trace_map_.end(); it++) {
-      trace_output_writer_->WriteTraceUnit(it->second);
+  uint64_t keyid = 0;
+  for (auto it = trace_map_.begin(); it != trace_map_.end(); it++) {
+    it->second.key_id = keyid;
+    keyid++;
+
+    if (it->second.access_count <= analyzer_opts_.output_ignore_count) {
+      continue;
     }
+    if (need_output_) {
+        trace_output_writer_->WriteTraceUnit(it->second);
+    }
+    if (analyzer_opts_.print_stats) {
+      // Build the access count map to get distribution
+      if (count_map_.find(it->second.access_count) == count_map_.end()) {
+        count_map_[it->second.access_count] = 1;
+      } else {
+        count_map_[it->second.access_count]++;
+      }
+
+      // build the key size distribution set
+      if (key_stats_.find(it->second.key.size()) == key_stats_.end()) {
+        key_stats_[it->second.key.size()] = 1;
+      } else {
+        key_stats_[it->second.key.size()]++;
+      }
+    }
+  }
+  if (analyzer_opts_.print_stats) {
+    PrintStatistics();
   }
   return Status::OK();
 }
@@ -218,6 +243,29 @@ Status TraceAnalyzer::TraceMapInsertion(TraceUnit &unit) {
   }
   return Status::OK();
 }
+
+
+void TraceAnalyzer::PrintStatistics() {
+  std::cout << "total_reqeusts: " << total_requests
+            << " total_get: " << total_get
+            << " total_write_batch: " << total_write_batch
+            << " offset: " << trace_reader_->get_offset()
+            << " total_keys: "<< trace_map_.size() <<"\n";
+  std::cout << "The access count distribution\n";
+
+  for(auto it = count_map_.begin(); it != count_map_.end(); it++) {
+    std::cout << "access: " << it->first << " nums: " << it->second <<"\n";
+  }
+
+  std::cout << "\n The key sizes: \n";
+  for(auto it = key_stats_.begin(); it != key_stats_.end(); it++) {
+    std::cout << "key_size: " << it->first << " nums: " << it->second <<"\n";
+  }
+
+}
+
+
+
 
 namespace {
 
@@ -245,7 +293,7 @@ int TraceAnalyzerTool::Run(int argc, char **argv) {
   std::string output_path;
   bool need_output = false;
 
-  AnalyzerOptions analyzer_opts(true, false, false, false);
+  AnalyzerOptions analyzer_opts;
 
   if (argc <= 1) {
     print_help();
@@ -258,14 +306,19 @@ int TraceAnalyzerTool::Run(int argc, char **argv) {
     } else if (strncmp(argv[i], "--output_file=", 14) == 0) {
       output_path = argv[i] + 14;
       need_output = true;
-    } else if (strncmp(argv[i], "--use_get", 0) == 0) {
+    } else if (strncmp(argv[i], "--use_get", 9) == 0) {
       analyzer_opts.use_get = true;
-    } else if (strncmp(argv[i], "--use_put", 0) == 0) {
+    } else if (strncmp(argv[i], "--use_put", 9) == 0) {
       analyzer_opts.use_put = true;
-    } else if (strncmp(argv[i], "--use_delete", 0) == 0) {
+    } else if (strncmp(argv[i], "--use_delete", 12) == 0) {
       analyzer_opts.use_delete = true;
-    } else if (strncmp(argv[i], "--use_merge", 0) == 0) {
+    } else if (strncmp(argv[i], "--use_merge", 11) == 0) {
       analyzer_opts.use_merge = true;
+    } else if (strncmp(argv[i], "--print_stats", 13) == 0) {
+      analyzer_opts.print_stats = true;
+     } else if (strncmp(argv[i], "--output_ignore_count=", 22) == 0) {
+       std::string tmp = argv[i] + 22;
+       analyzer_opts.output_ignore_count = std::stoi(tmp);
     } else {
       fprintf(stderr, "Unrecognized argument '%s'\n\n", argv[i]);
       print_help();
