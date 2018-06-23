@@ -11,6 +11,7 @@
 #include <list>
 #include <map>
 #include <utility>
+#include <set>
 
 #include "rocksdb/env.h"
 #include "util/trace_replay.h"
@@ -29,6 +30,7 @@ struct TraceUnit {
   uint64_t value_size;
   uint64_t ts;
   uint64_t uid;
+  uint64_t key_id;
   uint64_t access_count;
 };
 
@@ -38,9 +40,10 @@ class AnalyzerOptions {
   bool use_put;
   bool use_delete;
   bool use_merge;
+  bool print_stats;
+  uint64_t  output_ignore_count;
 
-  AnalyzerOptions(bool _use_get, bool _use_put, bool _use_delete,
-                  bool _use_merge);
+  AnalyzerOptions();
 
   ~AnalyzerOptions();
 };
@@ -74,8 +77,11 @@ class TraceAnalyzer {
   bool need_output_;
   AnalyzerOptions analyzer_opts_;
   std::map<std::string, TraceUnit> trace_map_;
+  std::map<uint64_t, uint64_t> count_map_;
+  std::map<uint64_t, uint64_t> key_stats_;
 
   Status TraceMapInsertion(TraceUnit &unit);
+  void PrintStatistics();
 };
 
 class TraceOutputWriter {
