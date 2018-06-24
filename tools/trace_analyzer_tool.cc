@@ -259,12 +259,12 @@ void TraceAnalyzer::PrintStatistics() {
             << " total_write_batch: " << total_write_batch
             << " offset: " << trace_reader_->get_offset()
             << " total_keys: "<< trace_map_.size() <<"\n";
-  std::cout <<"colume familys: cf_id";
+  std::cout <<"colume family name : cf_id\n";
   for(auto it = cf_map_.begin(); it !=cf_map_.end(); it++) {
     std::cout << it->first << " : " << it->second <<"\n";
   }
 
-  std::cout << "The access count distribution\n";
+  std::cout << "\nThe access count distribution\n";
 
   for(auto it = count_map_.begin(); it != count_map_.end(); it++) {
     std::cout << "access: " << it->first << " nums: " << it->second <<"\n";
