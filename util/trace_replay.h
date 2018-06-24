@@ -32,11 +32,13 @@ enum TraceType : char {
 struct Trace {
   uint64_t ts;
   TraceType type;
+  std::string cf_name;
   std::string payload;
 
   void reset() {
     ts = 0;
     type = kTraceMax;
+    cf_name.clear();
     payload.clear();
   }
 };
@@ -46,8 +48,8 @@ class Tracer {
   Tracer(Env* env, std::unique_ptr<TraceWriter>&& trace_writer);
   ~Tracer();
 
-  Status TraceWrite(WriteBatch* write_batch);
-  Status TraceGet(const Slice& key);
+  Status TraceWrite(WriteBatch* write_batch, const std::string& cf_name);
+  Status TraceGet(const Slice& key, const std::string& cf_name);
 
   Status Close();
 
