@@ -29,6 +29,7 @@ Status TraceWriter::WriteHeader() {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceBegin;
+  trace.cf_name = kTraceMagic;
   trace.payload = header;
 
   return WriteRecord(trace);
@@ -46,6 +47,14 @@ Status TraceWriter::WriteRecord(Trace& trace) {
   if (!s.ok()) {
     return s;
   }
+  // Colume family name
+  std::string cf_length;
+  PutFixed32(&cf_length, static_cast<uint32_t>(trace.cf_name.size()));
+  s = file_writer_->Append(cf_length);
+  if (!s.ok()) {
+    return s;
+  }
+  s = file_writer_->Append(Slice(trace.cf_name));
 
   // Payload
   std::string payload_length;
@@ -116,6 +125,36 @@ Status TraceReader::ReadRecord(Trace& trace) {
   TraceType type = static_cast<TraceType>(buffer_[0]);
   trace.type = type;
 
+   // Read colume family name length
+  s = file_reader_->Read(offset_, 4, &result_, buffer_);
+  if (!s.ok()) {
+    return s;
+  }
+  offset_ += 4;
+  if (result_.size() < 4) {
+    return Status::Corruption("Corrupted trace file.");
+  }
+  uint32_t cf_len = DecodeFixed32(buffer_);
+
+  // Read cf_name
+  unsigned int bytes_to_read = cf_len;
+  unsigned int to_read =
+      bytes_to_read > kBufferSize ? kBufferSize : bytes_to_read;
+  while (to_read > 0) {
+    s = file_reader_->Read(offset_, to_read, &result_, buffer_);
+    if (!s.ok()) {
+      return s;
+    }
+    if (result_.size() < to_read) {
+      return Status::Corruption("Corrupted trace file.");
+    }
+    trace.cf_name.append(result_.data(), result_.size());
+
+    offset_ += to_read;
+    bytes_to_read -= to_read;
+    to_read = bytes_to_read > kBufferSize ? kBufferSize : bytes_to_read;
+  }
+
   // Read Payload length
   s = file_reader_->Read(offset_, 4, &result_, buffer_);
   if (!s.ok()) {
@@ -128,9 +167,8 @@ Status TraceReader::ReadRecord(Trace& trace) {
   uint32_t payload_len = DecodeFixed32(buffer_);
 
   // Read Payload
-  unsigned int bytes_to_read = payload_len;
-  unsigned int to_read =
-      bytes_to_read > kBufferSize ? kBufferSize : bytes_to_read;
+  bytes_to_read = payload_len;
+  to_read = bytes_to_read > kBufferSize ? kBufferSize : bytes_to_read;
   while (to_read > 0) {
     s = file_reader_->Read(offset_, to_read, &result_, buffer_);
     if (!s.ok()) {
@@ -156,18 +194,20 @@ Tracer::Tracer(Env* env, std::unique_ptr<TraceWriter>&& trace_writer)
 
 Tracer::~Tracer() { trace_writer_.reset(); }
 
-Status Tracer::TraceWrite(WriteBatch* write_batch) {
+Status Tracer::TraceWrite(WriteBatch* write_batch, const std::string& cf_name) {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceWrite;
+  trace.cf_name = cf_name;
   trace.payload = write_batch->Data();
   return trace_writer_->WriteRecord(trace);
 }
 
-Status Tracer::TraceGet(const Slice& key) {
+Status Tracer::TraceGet(const Slice& key, const std::string& cf_name) {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceGet;
+  trace.cf_name = cf_name;
   trace.payload = key.ToString();
   return trace_writer_->WriteRecord(trace);
 }

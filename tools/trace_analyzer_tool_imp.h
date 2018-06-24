@@ -30,6 +30,7 @@ struct TraceUnit {
   uint64_t value_size;
   uint64_t ts;
   uint64_t uid;
+  int cf_id;
   uint64_t key_id;
   uint64_t access_count;
 };
@@ -72,6 +73,7 @@ class TraceAnalyzer {
   size_t offset_;
   char *buffer_;
   uint64_t guid_;
+  int cf_id_;
   std::string trace_name_;
   std::string output_name_;
   bool need_output_;
@@ -79,6 +81,7 @@ class TraceAnalyzer {
   std::map<std::string, TraceUnit> trace_map_;
   std::map<uint64_t, uint64_t> count_map_;
   std::map<uint64_t, uint64_t> key_stats_;
+  std::map<std::string, int> cf_map_;
 
   Status TraceMapInsertion(TraceUnit &unit);
   void PrintStatistics();
