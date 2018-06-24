@@ -84,7 +84,8 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     StartTrace(trace_opts, trace_filename);
   }
   if (tracer_) {
-    tracer_->TraceWrite(my_batch);
+    std::string cf_name_trace = "unkown";
+    tracer_->TraceWrite(my_batch, cf_name_trace);
   }
   trace_mutex_.Unlock();
 
