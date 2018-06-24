@@ -48,7 +48,7 @@ Status TraceOutputWriter::WriteFooter() { return Status::OK(); }
 Status TraceOutputWriter::WriteTraceUnit(TraceUnit &unit) {
   Status s;
   std::ostringstream out_format;
-  out_format << unit.type << "\t" << unit.uid << "\t" << unit.key_id << "\t"
+  out_format << unit.type << "\t" << unit.cf_id << "\t" << unit.key_id << "\t"
             << unit.access_count
              << "\t" << unit.value_size << "\t" << unit.key.size() << "\t"
              << MicrosdToDate(unit.ts) << "\t" << StringToHex(unit.key) << "\n";
@@ -102,6 +102,7 @@ TraceAnalyzer::TraceAnalyzer(std::string &trace_path, std::string &output_path,
   offset_ = 0;
   buffer_ = new char[1024];
   guid_ = 0;
+  cf_id_ = 0;
   total_requests = 0;
   total_keys = 0;
   total_get = 0;
@@ -179,6 +180,13 @@ Status TraceAnalyzer::StartProcessing() {
       unit.uid = 0;
       unit.key_id = 0;
       unit.access_count = 0;
+      if(cf_map_.find(trace.cf_name) == cf_map_.end()) {
+        cf_map_[trace.cf_name] = cf_id_;
+        cf_id_++;
+        unit.cf_id = cf_map_[trace.cf_name];
+      } else {
+        unit.cf_id = cf_map_[trace.cf_name];
+      }
       s = TraceMapInsertion(unit);
       if (!s.ok()) {
         fprintf(stderr, "Cannot insert the trace unit to the map\n");
@@ -251,6 +259,11 @@ void TraceAnalyzer::PrintStatistics() {
             << " total_write_batch: " << total_write_batch
             << " offset: " << trace_reader_->get_offset()
             << " total_keys: "<< trace_map_.size() <<"\n";
+  std::cout <<"colume familys: cf_id";
+  for(auto it = cf_map_.begin(); it !=cf_map_.end(); it++) {
+    std::cout << it->first << " : " << it->second <<"\n";
+  }
+
   std::cout << "The access count distribution\n";
 
   for(auto it = count_map_.begin(); it != count_map_.end(); it++) {
