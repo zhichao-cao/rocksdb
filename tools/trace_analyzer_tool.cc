@@ -10,6 +10,7 @@
 #include <inttypes.h>
 #include <time.h>
 #include <iostream>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -48,8 +49,7 @@ Status TraceOutputWriter::WriteFooter() { return Status::OK(); }
 Status TraceOutputWriter::WriteTraceUnit(TraceUnit &unit) {
   Status s;
   std::ostringstream out_format;
-  out_format << unit.type << "\t" << unit.cf_id << "\t" << unit.key_id << "\t"
-            << unit.access_count
+  out_format << unit.type << "\t" << unit.cf_id
              << "\t" << unit.value_size << "\t" << unit.key.size() << "\t"
              << MicrosdToDate(unit.ts) << "\t" << StringToHex(unit.key) << "\n";
   std::string content(out_format.str());
@@ -83,21 +83,27 @@ std::string TraceOutputWriter::StringToHex(const std::string &input) {
 }
 
 AnalyzerOptions::AnalyzerOptions() {
+  output_key_stats = false;
+  output_access_count_stats = false;
+  output_trace_unit = false;
   use_get = true;
   use_put = false;
   use_delete = false;
   use_merge = false;
-  print_stats = false;
+  print_overall_stats = false;
+  print_key_distribution = false;
+  print_value_distribution = false;
   output_ignore_count = 0;
+  value_interval = 128;
+  output_prefix = "/trace_output";
 }
 
 AnalyzerOptions::~AnalyzerOptions() {}
 
 TraceAnalyzer::TraceAnalyzer(std::string &trace_path, std::string &output_path,
-                             bool need_output, AnalyzerOptions _analyzer_opts)
+                              AnalyzerOptions _analyzer_opts)
     : trace_name_(trace_path),
-      output_name_(output_path),
-      need_output_(need_output),
+      output_path_(output_path),
       analyzer_opts_(_analyzer_opts) {
   offset_ = 0;
   buffer_ = new char[1024];
@@ -131,8 +137,10 @@ Status TraceAnalyzer::PrepareProcessing() {
     return Status::OK();
   }
 
+  std::string output_name;
+  output_name = output_path_ + "/" +analyzer_opts_.output_prefix +"-trace_unit.txt";
   unique_ptr<WritableFile> output_file;
-  s = env_->NewWritableFile(output_name_, &output_file, env_options);
+  s = env_->NewWritableFile(output_name, &output_file, env_options);
   if (!s.ok()) {
     return s;
   }
@@ -145,6 +153,7 @@ Status TraceAnalyzer::PrepareProcessing() {
   return Status::OK();
 }
 
+// process the trace and generate the analysis
 Status TraceAnalyzer::StartProcessing() {
   Status s;
   Trace header;
@@ -175,106 +184,159 @@ Status TraceAnalyzer::StartProcessing() {
       total_get++;
       unit.type = 1;
       unit.key = trace.payload;
-      unit.ts = trace.ts;
       unit.value_size = 0;
-      unit.uid = 0;
-      unit.key_id = 0;
-      unit.access_count = 0;
-      if(cf_map_.find(trace.cf_name) == cf_map_.end()) {
-        cf_map_[trace.cf_name] = cf_id_;
+      unit.ts = trace.ts;
+      if(get_map_.find(trace.cf_name) == get_map_.end()) {
+        TraceStats get_stats;
+        get_stats.cf_id = cf_id_;
+        get_stats.cf_name = trace.cf_name;
+        unit.cf_id = cf_id_;
+        s = TraceStatsInsertionGet(unit, get_stats);
+        if (!s.ok()) {
+          fprintf(stderr, "Cannot insert the trace unit to the map\n");
+          return s;
+        }
+        get_map_[trace.cf_name] = get_stats;
         cf_id_++;
-        unit.cf_id = cf_map_[trace.cf_name];
       } else {
-        unit.cf_id = cf_map_[trace.cf_name];
+        unit.cf_id = get_map_[trace.cf_name].cf_id;
+        s = TraceStatsInsertionGet(unit, get_map_[trace.cf_name]);
+        if (!s.ok()) {
+            fprintf(stderr, "Cannot insert the trace unit to the map\n");
+            return s;
+        }
       }
-      s = TraceMapInsertion(unit);
+    }
+    if (analyzer_opts_.output_trace_unit) {
+      s = trace_output_writer_->WriteTraceUnit(unit);
       if (!s.ok()) {
-        fprintf(stderr, "Cannot insert the trace unit to the map\n");
+          fprintf(stderr, "Cannot write the trace unit to the file\n");
+          return s;
       }
     }
   }
-  // fprintf(stderr, "Ops Written: %ld\n", ops);
-
   if (s.IsIncomplete()) {
-    // Fix it: Reaching eof returns Incomplete status at the moment.
-
+        // Fix it: Reaching eof returns Incomplete status at the moment.
+        //
     return Status::OK();
   }
+
   return s;
 }
 
-Status TraceAnalyzer::EndProcessing() {
-  uint64_t keyid = 0;
-  for (auto it = trace_map_.begin(); it != trace_map_.end(); it++) {
-    it->second.key_id = keyid;
-    keyid++;
 
-    if (it->second.access_count <= analyzer_opts_.output_ignore_count) {
-      continue;
-    }
-    if (need_output_) {
-        trace_output_writer_->WriteTraceUnit(it->second);
-    }
-    if (analyzer_opts_.print_stats) {
-      // Build the access count map to get distribution
-      if (count_map_.find(it->second.access_count) == count_map_.end()) {
-        count_map_[it->second.access_count] = 1;
-      } else {
-        count_map_[it->second.access_count]++;
+Status TraceAnalyzer::MakeStatistics() {
+  for(auto i = get_map_.begin(); i != get_map_.end(); i++) {
+   uint64_t keyid = 0;
+    for(auto it = i->second.key_stats.begin(); it != i->second.key_stats.end(); it++) {
+      it->second.key_id = keyid;
+      keyid++;
+
+      if (it->second.access_count <= analyzer_opts_.output_ignore_count) {
+        continue;
       }
 
-      // build the key size distribution set
-      if (key_stats_.find(it->second.key.size()) == key_stats_.end()) {
-        key_stats_[it->second.key.size()] = 1;
-      } else {
-        key_stats_[it->second.key.size()]++;
+      if (analyzer_opts_.output_access_count_stats) {
+        if (i->second.access_count_stats.find(it->second.access_count) == i->second.access_count_stats.end()) {
+          i->second.access_count_stats[it->second.access_count] = 1;
+        } else {
+          i->second.access_count_stats[it->second.access_count]++;
+        }
       }
+
+      if (analyzer_opts_.print_key_distribution) {
+        if (i->second.key_size_stats.find(it->first.size()) == i->second.key_size_stats.end()) {
+          i->second.key_size_stats[it->first.size()] = 1;
+        } else {
+          i->second.key_size_stats[it->first.size()]++;
+        }
+      }
+
+    }
+
+    if(analyzer_opts_.output_key_stats) {
+      std::string key_stats_path = output_path_ + "/" + analyzer_opts_.output_prefix
+                      + "-" + i->second.cf_name + "-key_access_stats.txt";
+      std::ofstream key_stats_file (key_stats_path, std::ofstream::out);
+      if (!key_stats_file.is_open()) {
+        fprintf(stderr, "Cannot open the key access stats output file\n");
+        exit(1);
+      }
+      for(auto it = i->second.key_stats.begin(); it != i->second.key_stats.end(); it++) {
+        key_stats_file << it->second.key_id << " " << it->second.cf_id << " " << it->second.value_size << " " << it->second.access_count <<"\n";
+      }
+      key_stats_file.close();
+    }
+
+    if(analyzer_opts_.output_access_count_stats) {
+      std::string access_count_path = output_path_ + "/" + analyzer_opts_.output_prefix
+                                + "-" + i->second.cf_name + "-access_count_stats.txt";
+      std::ofstream access_count_file (access_count_path, std::ofstream::out);
+      if (!access_count_file.is_open()) {
+        fprintf(stderr, "Cannot open the access count stats output file\n");
+        exit(1);
+      }
+      for(auto it = i->second.access_count_stats.begin(); it != i->second.access_count_stats.end(); it++) {
+      access_count_file << "access_count: " << it->first << " nums: " << it->second << "\n";
+      }
+      access_count_file.close();
     }
   }
-  if (analyzer_opts_.print_stats) {
-    PrintStatistics();
-  }
+
   return Status::OK();
 }
 
-Status TraceAnalyzer::TraceMapInsertion(TraceUnit &unit) {
-  auto found = trace_map_.find(unit.key);
-  if (found == trace_map_.end()) {
-    unit.uid = guid_;
-    guid_++;
-    unit.access_count = 1;
-    trace_map_[unit.key] = unit;
+
+// End the processing, print the requested results
+Status TraceAnalyzer::EndProcessing() {
+  PrintGetStatistics();
+  return Status::OK();
+}
+
+
+// add the trace access count to the map
+Status TraceAnalyzer::TraceStatsInsertionGet(TraceUnit &unit, TraceStats& stats) {
+  StatsUnit stats_unit;
+  stats_unit.cf_id = stats.cf_id;
+  stats_unit.value_size = unit.value_size;
+  stats_unit.key_id = 0;
+  auto found = stats.key_stats.find(unit.key);
+  if (found == stats.key_stats.end()) {
+    stats_unit.access_count = 1;
+    stats.key_stats[unit.key] = stats_unit;
   } else {
     found->second.access_count++;
-    unit.uid = found->second.uid;
-    unit.access_count = found->second.access_count;
   }
   return Status::OK();
 }
 
 
-void TraceAnalyzer::PrintStatistics() {
-  std::cout << "total_reqeusts: " << total_requests
-            << " total_get: " << total_get
-            << " total_write_batch: " << total_write_batch
-            << " offset: " << trace_reader_->get_offset()
-            << " total_keys: "<< trace_map_.size() <<"\n";
-  std::cout <<"colume family name : cf_id\n";
-  for(auto it = cf_map_.begin(); it !=cf_map_.end(); it++) {
-    std::cout << it->first << " : " << it->second <<"\n";
+
+void TraceAnalyzer::PrintGetStatistics() {
+  uint64_t total_key_num = 0;
+  for(auto i = get_map_.begin(); i != get_map_.end(); i++) {
+    total_key_num += static_cast<uint64_t>(i->second.key_stats.size());
+    std::cout << "*********************************************************\n";
+    std::cout << "colume family name: " << i->second.cf_name << " cf_id: "
+              << i->second.cf_id << "\n";
+    std::cout << "Total keys of this colume family: " << i->second.key_stats.size() << "\n";
+    if (analyzer_opts_.print_key_distribution) {
+      std::cout << "The key size distribution\n";
+      for(auto it = i->second.key_size_stats.begin(); it != i->second.key_size_stats.end(); it++) {
+        std::cout << "key size: " << it->first << " nums: " << it->second <<"\n";
+      }
+    }
   }
 
-  std::cout << "\nThe access count distribution\n";
 
-  for(auto it = count_map_.begin(); it != count_map_.end(); it++) {
-    std::cout << "access: " << it->first << " nums: " << it->second <<"\n";
+
+  if(analyzer_opts_.print_overall_stats) {
+  std::cout << "*********************************************************\n";
+    std::cout << "total_reqeusts: " << total_requests
+              << " total_get: " << total_get
+              << " total_write_batch: " << total_write_batch
+              << " total_keys: "<< total_key_num <<"\n";
   }
-
-  std::cout << "\n The key sizes: \n";
-  for(auto it = key_stats_.begin(); it != key_stats_.end(); it++) {
-    std::cout << "key_size: " << it->first << " nums: " << it->second <<"\n";
-  }
-
 }
 
 
@@ -287,8 +349,16 @@ void print_help() {
           R"(trace_analyzer --trace_file=<trace file path> [--comman=]
       --trace_file=<trace file path>
         The trace path
-      --output_file=<the output file path>
-        Create readble file of the trace
+      --output_dir=<the output dir>
+        The directory to store the output files
+      --output_prefix=<the prefix of all output>
+        The prefix used for all the output files
+      --output_key_stats
+        Output the key access count statistics to file
+      --output_access_count_stats
+        Output the access count distribution statistics to file
+      --output_trace_unit
+        Output the trace unit to file for further analyze
       --use_get
         Analyze the GET operations
       --use_put
@@ -297,6 +367,10 @@ void print_help() {
         Analyze the SingleDELETE operations
       --use_merge
         Analyze the MERGE operations
+      --print_stats
+        Print the stats of the input trace
+      --output_ignore_count=
+        ignores the access count <= this value to shorter the output
    )");
 }
 }  // namespace
@@ -304,7 +378,6 @@ void print_help() {
 int TraceAnalyzerTool::Run(int argc, char **argv) {
   std::string trace_path;
   std::string output_path;
-  bool need_output = false;
 
   AnalyzerOptions analyzer_opts;
 
@@ -316,9 +389,16 @@ int TraceAnalyzerTool::Run(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     if (strncmp(argv[i], "--trace_file=", 13) == 0) {
       trace_path = argv[i] + 13;
-    } else if (strncmp(argv[i], "--output_file=", 14) == 0) {
-      output_path = argv[i] + 14;
-      need_output = true;
+    } else if (strncmp(argv[i], "--output_dir=", 13) == 0) {
+      output_path = argv[i] + 13;
+    } else if (strncmp(argv[i], "--output_prefix=", 16) == 0) {
+      analyzer_opts.output_prefix = argv[i] + 16;
+    } else if (strncmp(argv[i], "--output_key_stats", 18) == 0) {
+      analyzer_opts.output_key_stats = true;
+    } else if (strncmp(argv[i], "--output_access_count_stats", 27) == 0) {
+      analyzer_opts.output_access_count_stats = true;
+    } else if (strncmp(argv[i], "--output_trace_unit", 19) == 0) {
+      analyzer_opts.output_trace_unit = true;
     } else if (strncmp(argv[i], "--use_get", 9) == 0) {
       analyzer_opts.use_get = true;
     } else if (strncmp(argv[i], "--use_put", 9) == 0) {
@@ -327,11 +407,17 @@ int TraceAnalyzerTool::Run(int argc, char **argv) {
       analyzer_opts.use_delete = true;
     } else if (strncmp(argv[i], "--use_merge", 11) == 0) {
       analyzer_opts.use_merge = true;
-    } else if (strncmp(argv[i], "--print_stats", 13) == 0) {
-      analyzer_opts.print_stats = true;
-     } else if (strncmp(argv[i], "--output_ignore_count=", 22) == 0) {
-       std::string tmp = argv[i] + 22;
-       analyzer_opts.output_ignore_count = std::stoi(tmp);
+    } else if (strncmp(argv[i], "--print_overall_stats", 21) == 0) {
+      analyzer_opts.print_overall_stats = true;
+    } else if (strncmp(argv[i], "--print_key_distribution", 24) == 0) {
+      analyzer_opts.print_key_distribution = true;
+    } else if (strncmp(argv[i], "--output_ignore_count=", 22) == 0) {
+      std::string tmp = argv[i] + 22;
+      analyzer_opts.output_ignore_count = std::stoi(tmp);
+    } else if (strncmp(argv[i], "--value_interval=", 17) == 0) {
+      std::string tmp = argv[i] + 17;
+      analyzer_opts.value_interval = std::stoi(tmp);
+      analyzer_opts.print_value_distribution = true;
     } else {
       fprintf(stderr, "Unrecognized argument '%s'\n\n", argv[i]);
       print_help();
@@ -340,7 +426,7 @@ int TraceAnalyzerTool::Run(int argc, char **argv) {
   }
 
   TraceAnalyzer *analyzer =
-      new TraceAnalyzer(trace_path, output_path, need_output, analyzer_opts);
+      new TraceAnalyzer(trace_path, output_path, analyzer_opts);
 
   rocksdb::Status s = analyzer->PrepareProcessing();
   if (!s.ok()) {
@@ -352,6 +438,12 @@ int TraceAnalyzerTool::Run(int argc, char **argv) {
   if (!s.ok()) {
     analyzer->EndProcessing();
     fprintf(stderr, "Cannot processing the trace\n");
+    exit(1);
+  }
+
+  s = analyzer->MakeStatistics();
+  if (!s.ok()) {
+    fprintf(stderr, "Cannot make the statistics\n");
     exit(1);
   }
 
