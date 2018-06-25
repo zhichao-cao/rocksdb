@@ -367,8 +367,12 @@ void print_help() {
         Analyze the SingleDELETE operations
       --use_merge
         Analyze the MERGE operations
-      --print_stats
-        Print the stats of the input trace
+      --print_overall_stats
+        Print the stats of the whole trace, like total requests, keys, and etc.
+      --print_key_distribution
+        Print the key size distribution
+      --print_value_distribution
+        Print the value size distribution, only available for write
       --output_ignore_count=
         ignores the access count <= this value to shorter the output
    )");
