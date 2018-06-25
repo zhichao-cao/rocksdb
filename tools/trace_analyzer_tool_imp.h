@@ -39,7 +39,8 @@ struct StatsUnit {
   uint64_t access_count;
 };
 
-/*
+// write bach handler to be used for WriteBache iterator
+// when processing the write trace
 struct TraceWriteHandler : public WriteBatch::Handler {
   TraceAnalyzer * ta_ptr;
   TraceWriteHandler() { ta_ptr = nullptr; }
@@ -85,7 +86,6 @@ struct TraceWriteHandler : public WriteBatch::Handler {
       return Status::OK();
     }
 };
-*/
 
 class AnalyzerOptions {
  public:
