@@ -28,6 +28,8 @@ struct LDBOptions {
   std::shared_ptr<SliceFormatter> key_formatter;
 
   std::string print_help_header = "ldb - RocksDB Tool";
+
+  std::map<std::string, const Comparator*> comparator_map;
 };
 
 class LDBTool {
