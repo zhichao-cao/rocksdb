@@ -15,7 +15,8 @@ namespace rocksdb {
 Status LoadOptionsFromFile(const std::string& file_name, Env* env,
                            DBOptions* db_options,
                            std::vector<ColumnFamilyDescriptor>* cf_descs,
-                           bool ignore_unknown_options) {
+                           bool ignore_unknown_options,
+                           std::map<std::string, const Comparator*> comp_map) {
   RocksDBOptionsParser parser;
   Status s = parser.Parse(file_name, env, ignore_unknown_options);
   if (!s.ok()) {
@@ -28,7 +29,17 @@ Status LoadOptionsFromFile(const std::string& file_name, Env* env,
   const std::vector<ColumnFamilyOptions>& cf_opts = *parser.cf_opts();
   cf_descs->clear();
   for (size_t i = 0; i < cf_opts.size(); ++i) {
-    cf_descs->push_back({cf_names[i], cf_opts[i]});
+    const auto& opt_map = (*parser.cf_opt_maps())[i];
+    const auto& cmp_option_entry = opt_map.find("comparator");
+    ColumnFamilyOptions cfo = cf_opts[i];
+    if (cmp_option_entry != opt_map.end()) {
+      std::string comp_name = cmp_option_entry->second;
+      const auto& cmp = comp_map.find(comp_name);
+      if (cmp != comp_map.end()) {
+        cfo.comparator = cmp->second;
+      }
+    }
+    cf_descs->push_back({cf_names[i], cfo});
   }
   return Status::OK();
 }
@@ -63,7 +74,8 @@ Status GetLatestOptionsFileName(const std::string& dbpath,
 Status LoadLatestOptions(const std::string& dbpath, Env* env,
                          DBOptions* db_options,
                          std::vector<ColumnFamilyDescriptor>* cf_descs,
-                         bool ignore_unknown_options) {
+                         bool ignore_unknown_options,
+                         std::map<std::string, const Comparator*> comp_map) {
   std::string options_file_name;
   Status s = GetLatestOptionsFileName(dbpath, env, &options_file_name);
   if (!s.ok()) {
@@ -71,7 +83,7 @@ Status LoadLatestOptions(const std::string& dbpath, Env* env,
   }
 
   return LoadOptionsFromFile(dbpath + "/" + options_file_name, env, db_options,
-                             cf_descs, ignore_unknown_options);
+                             cf_descs, ignore_unknown_options, comp_map);
 }
 
 Status CheckOptionsCompatibility(
