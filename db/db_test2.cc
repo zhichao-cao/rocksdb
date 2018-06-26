@@ -8,13 +8,16 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 
 #include "db/db_test_util.h"
 #include "db/read_callback.h"
 #include "port/port.h"
 #include "port/stack_trace.h"
+#include "rocksdb/ldb_tool.h"
 #include "rocksdb/persistent_cache.h"
+#include "rocksdb/utilities/ldb_cmd.h"
 #include "rocksdb/wal_filter.h"
 
 namespace rocksdb {
@@ -1695,6 +1698,43 @@ TEST_F(DBTest2, PersistentCache) {
   }
 }
 #endif // !OS_SOLARIS
+
+TEST_F(DBTest2, LdbOpenDifferentCFCmps) {
+  Options options;
+  Options rev_cmp_opts;
+  rev_cmp_opts.comparator = ReverseBytewiseComparator();
+  CreateColumnFamilies({"pikachu"}, rev_cmp_opts);
+  ReopenWithColumnFamilies({"default", "pikachu"},
+                           std::vector<Options>({options, rev_cmp_opts}));
+  ASSERT_OK(Put(1, "foo", "bar"));
+  ASSERT_OK(Put(0, "foo", "bar"));
+  ASSERT_OK(Put(1, "bar", "foo"));
+  Close();
+
+  LDBOptions ldb_options;
+  const Comparator* c1 = BytewiseComparator();
+  const Comparator* c2 = ReverseBytewiseComparator();
+  ldb_options.comparator_map[std::string(c1->Name())] = c1;
+  ldb_options.comparator_map[std::string(c2->Name())] = c2;
+  std::string arg1 = "scan";
+  std::string arg2 = "--db=" + dbname_;
+  std::string arg3 = "--try_load_options";
+
+  char* argv[] = {nullptr, const_cast<char*>(arg1.c_str()),
+                  const_cast<char*>(arg2.c_str()),
+                  const_cast<char*>(arg3.c_str())};
+  int ret_code =
+      LDBCommandRunner::RunCommand(4, argv, Options(), ldb_options, nullptr);
+  ASSERT_EQ(0, ret_code);
+
+  std::string arg4 = "--column_family=pikachu";
+  char* argv2[] = {
+      nullptr, const_cast<char*>(arg1.c_str()), const_cast<char*>(arg2.c_str()),
+      const_cast<char*>(arg3.c_str()), const_cast<char*>(arg4.c_str())};
+  ret_code =
+      LDBCommandRunner::RunCommand(5, argv2, Options(), ldb_options, nullptr);
+  ASSERT_EQ(0, ret_code);
+}
 
 namespace {
 void CountSyncPoint() {
