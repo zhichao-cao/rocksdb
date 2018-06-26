@@ -42,6 +42,7 @@ Status TraceWriter::WriteRecord(Trace& trace) {
   // Metadata: 9 bytes: 8 bytes timestamp, 1 byte op type
   std::string metadata(kMetadataSize, '\0');
   EncodeFixed64(&metadata[0], trace.ts);
+  EncodeFixed32(&metadata[8], trace.cf_id);
   metadata[kMetadataSize - 1] = trace.type;
   s = file_writer_->Append(Slice(metadata));
   if (!s.ok()) {
@@ -112,6 +113,19 @@ Status TraceReader::ReadRecord(Trace& trace) {
   assert(buffer_ != nullptr);
   uint64_t ts = DecodeFixed64(buffer_);
   trace.ts = ts;
+
+  // Read column family ID cf_id
+  s = file_reader_->Read(offset_, 4, &result_, buffer_);
+  if (!s.ok()) {
+    return s;
+  }
+  if (result_.size() < 4) {
+    return Status::Corruption("Corrupted trace file.");
+  }
+  offset_ +=4;
+  assert(buffer_ != nullptr);
+  uint32_t cf_id = DecodeFixed32(buffer_);
+  trace.cf_id = cf_id;
 
   // Read TraceType
   s = file_reader_->Read(offset_, 1, &result_, buffer_);
@@ -194,19 +208,21 @@ Tracer::Tracer(Env* env, std::unique_ptr<TraceWriter>&& trace_writer)
 
 Tracer::~Tracer() { trace_writer_.reset(); }
 
-Status Tracer::TraceWrite(WriteBatch* write_batch, const std::string& cf_name) {
+Status Tracer::TraceWrite(WriteBatch* write_batch, const std::string& cf_name, const uint32_t& cf_id) {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceWrite;
+  trace.cf_id = cf_id;
   trace.cf_name = cf_name;
   trace.payload = write_batch->Data();
   return trace_writer_->WriteRecord(trace);
 }
 
-Status Tracer::TraceGet(const Slice& key, const std::string& cf_name) {
+Status Tracer::TraceGet(const Slice& key, const std::string& cf_name, const uint32_t& cf_id) {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceGet;
+  trace.cf_id = cf_id;
   trace.cf_name = cf_name;
   trace.payload = key.ToString();
   return trace_writer_->WriteRecord(trace);

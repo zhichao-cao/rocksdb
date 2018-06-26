@@ -32,6 +32,7 @@ enum TraceType : char {
 struct Trace {
   uint64_t ts;
   TraceType type;
+  uint32_t cf_id;
   std::string cf_name;
   std::string payload;
 
@@ -48,8 +49,8 @@ class Tracer {
   Tracer(Env* env, std::unique_ptr<TraceWriter>&& trace_writer);
   ~Tracer();
 
-  Status TraceWrite(WriteBatch* write_batch, const std::string& cf_name);
-  Status TraceGet(const Slice& key, const std::string& cf_name);
+  Status TraceWrite(WriteBatch* write_batch, const std::string& cf_name, const uint32_t& cf_id);
+  Status TraceGet(const Slice& key, const std::string& cf_name, const uint32_t& cf_id);
 
   Status Close();
 
@@ -103,7 +104,7 @@ class TraceWriter {
   Env* env_;
   unique_ptr<WritableFileWriter> file_writer_;
 
-  const unsigned int kMetadataSize = 9;
+  const unsigned int kMetadataSize = 13;
 };
 
 }  // namespace rocksdb
