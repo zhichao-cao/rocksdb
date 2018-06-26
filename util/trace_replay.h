@@ -49,8 +49,10 @@ class Tracer {
   Tracer(Env* env, std::unique_ptr<TraceWriter>&& trace_writer);
   ~Tracer();
 
-  Status TraceWrite(WriteBatch* write_batch, const std::string& cf_name, const uint32_t& cf_id);
-  Status TraceGet(const Slice& key, const std::string& cf_name, const uint32_t& cf_id);
+  Status TraceWrite(WriteBatch* write_batch, const std::string& cf_name,
+                    const uint32_t& cf_id);
+  Status TraceGet(const Slice& key, const std::string& cf_name,
+                  const uint32_t& cf_id);
 
   Status Close();
 

@@ -54,9 +54,9 @@ class AnalyzerOptions {
   bool print_key_distribution;
   bool print_value_distribution;
   bool print_top_k_access;
-  uint64_t  output_ignore_count;
+  uint64_t output_ignore_count;
   uint64_t start_time;
-  int  value_interval;
+  int value_interval;
   int top_k;
   std::string output_prefix;
 
@@ -64,7 +64,6 @@ class AnalyzerOptions {
 
   ~AnalyzerOptions();
 };
-
 
 struct TraceStats {
   uint32_t cf_id;
@@ -77,7 +76,6 @@ struct TraceStats {
   std::map<uint64_t, uint64_t> value_size_stats;
   FILE *trace_unit_file;
 };
-
 
 class TraceAnalyzer {
  public:
@@ -115,8 +113,8 @@ class TraceAnalyzer {
   std::map<std::string, TraceStats> get_map_;
   std::map<uint32_t, TraceStats> write_map_;
 
-  Status TraceStatsInsertionGet(TraceUnit &unit, TraceStats& stats);
-  Status TraceStatsInsertionWrite(TraceUnit &unit, TraceStats& stats);
+  Status TraceStatsInsertionGet(TraceUnit &unit, TraceStats &stats);
+  Status TraceStatsInsertionWrite(TraceUnit &unit, TraceStats &stats);
 
   void PrintGetStatistics();
   Status TraceUnitWriter(FILE *file_p, TraceUnit &unit);

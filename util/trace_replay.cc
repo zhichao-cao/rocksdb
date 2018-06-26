@@ -122,7 +122,7 @@ Status TraceReader::ReadRecord(Trace& trace) {
   if (result_.size() < 4) {
     return Status::Corruption("Corrupted trace file.");
   }
-  offset_ +=4;
+  offset_ += 4;
   assert(buffer_ != nullptr);
   uint32_t cf_id = DecodeFixed32(buffer_);
   trace.cf_id = cf_id;
@@ -139,7 +139,7 @@ Status TraceReader::ReadRecord(Trace& trace) {
   TraceType type = static_cast<TraceType>(buffer_[0]);
   trace.type = type;
 
-   // Read colume family name length
+  // Read colume family name length
   s = file_reader_->Read(offset_, 4, &result_, buffer_);
   if (!s.ok()) {
     return s;
@@ -208,7 +208,8 @@ Tracer::Tracer(Env* env, std::unique_ptr<TraceWriter>&& trace_writer)
 
 Tracer::~Tracer() { trace_writer_.reset(); }
 
-Status Tracer::TraceWrite(WriteBatch* write_batch, const std::string& cf_name, const uint32_t& cf_id) {
+Status Tracer::TraceWrite(WriteBatch* write_batch, const std::string& cf_name,
+                          const uint32_t& cf_id) {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceWrite;
@@ -218,7 +219,8 @@ Status Tracer::TraceWrite(WriteBatch* write_batch, const std::string& cf_name, c
   return trace_writer_->WriteRecord(trace);
 }
 
-Status Tracer::TraceGet(const Slice& key, const std::string& cf_name, const uint32_t& cf_id) {
+Status Tracer::TraceGet(const Slice& key, const std::string& cf_name,
+                        const uint32_t& cf_id) {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceGet;

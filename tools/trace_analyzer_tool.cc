@@ -9,13 +9,13 @@
 
 #include <inttypes.h>
 #include <time.h>
-#include <iostream>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <sstream>
-#include <vector>
 #include <stdexcept>
+#include <vector>
 
 #include "db/db_impl.h"
 #include "db/memtable.h"
@@ -174,7 +174,7 @@ AnalyzerOptions::AnalyzerOptions() {
 AnalyzerOptions::~AnalyzerOptions() {}
 
 TraceAnalyzer::TraceAnalyzer(std::string &trace_path, std::string &output_path,
-                              AnalyzerOptions _analyzer_opts)
+                             AnalyzerOptions _analyzer_opts)
     : trace_name_(trace_path),
       output_path_(output_path),
       analyzer_opts_(_analyzer_opts) {
@@ -260,7 +260,7 @@ Status TraceAnalyzer::StartProcessing() {
       unit.value_size = 0;
       unit.ts = trace.ts;
       unit.cf_id = trace.cf_id;
-      if(get_map_.find(trace.cf_name) == get_map_.end()) {
+      if (get_map_.find(trace.cf_name) == get_map_.end()) {
         TraceStats get_stats;
         get_stats.cf_id = trace.cf_id;
         get_stats.cf_name = trace.cf_name;
@@ -278,8 +278,8 @@ Status TraceAnalyzer::StartProcessing() {
         get_map_[trace.cf_name].get_count++;
         get_map_[trace.cf_name].total_count++;
         if (!s.ok()) {
-            fprintf(stderr, "Cannot insert the trace unit to the map\n");
-            return s;
+          fprintf(stderr, "Cannot insert the trace unit to the map\n");
+          return s;
         }
       }
 
@@ -300,23 +300,23 @@ Status TraceAnalyzer::StartProcessing() {
     }
   }
   if (s.IsIncomplete()) {
-        // Fix it: Reaching eof returns Incomplete status at the moment.
-        //
+    // Fix it: Reaching eof returns Incomplete status at the moment.
+    //
     return Status::OK();
   }
 
   return s;
 }
 
-
 Status TraceAnalyzer::MakeStatistics() {
-  for(auto i = get_map_.begin(); i != get_map_.end(); i++) {
+  for (auto i = get_map_.begin(); i != get_map_.end(); i++) {
     if (i->second.trace_unit_file != nullptr) {
       fclose(i->second.trace_unit_file);
     }
 
     uint64_t keyid = 0;
-    for(auto it = i->second.key_stats.begin(); it != i->second.key_stats.end(); it++) {
+    for (auto it = i->second.key_stats.begin(); it != i->second.key_stats.end();
+         it++) {
       it->second.key_id = keyid;
       keyid++;
 
@@ -325,7 +325,8 @@ Status TraceAnalyzer::MakeStatistics() {
       }
 
       if (analyzer_opts_.output_access_count_stats) {
-        if (i->second.access_count_stats.find(it->second.access_count) == i->second.access_count_stats.end()) {
+        if (i->second.access_count_stats.find(it->second.access_count) ==
+            i->second.access_count_stats.end()) {
           i->second.access_count_stats[it->second.access_count] = 1;
         } else {
           i->second.access_count_stats[it->second.access_count]++;
@@ -333,39 +334,46 @@ Status TraceAnalyzer::MakeStatistics() {
       }
 
       if (analyzer_opts_.print_key_distribution) {
-        if (i->second.key_size_stats.find(it->first.size()) == i->second.key_size_stats.end()) {
+        if (i->second.key_size_stats.find(it->first.size()) ==
+            i->second.key_size_stats.end()) {
           i->second.key_size_stats[it->first.size()] = 1;
         } else {
           i->second.key_size_stats[it->first.size()]++;
         }
       }
-
     }
 
-    if(analyzer_opts_.output_key_stats) {
-      std::string key_stats_path = output_path_ + "/" + analyzer_opts_.output_prefix
-                      + "-" + i->second.cf_name + "-key_access_stats.txt";
-      std::ofstream key_stats_file (key_stats_path, std::ofstream::out);
+    if (analyzer_opts_.output_key_stats) {
+      std::string key_stats_path = output_path_ + "/" +
+                                   analyzer_opts_.output_prefix + "-" +
+                                   i->second.cf_name + "-key_access_stats.txt";
+      std::ofstream key_stats_file(key_stats_path, std::ofstream::out);
       if (!key_stats_file.is_open()) {
         fprintf(stderr, "Cannot open the key access stats output file\n");
         exit(1);
       }
-      for(auto it = i->second.key_stats.begin(); it != i->second.key_stats.end(); it++) {
-        key_stats_file << it->second.key_id << " " << it->second.cf_id << " " << it->second.value_size << " " << it->second.access_count <<"\n";
+      for (auto it = i->second.key_stats.begin();
+           it != i->second.key_stats.end(); it++) {
+        key_stats_file << it->second.key_id << " " << it->second.cf_id << " "
+                       << it->second.value_size << " "
+                       << it->second.access_count << "\n";
       }
       key_stats_file.close();
     }
 
-    if(analyzer_opts_.output_access_count_stats) {
-      std::string access_count_path = output_path_ + "/" + analyzer_opts_.output_prefix
-                                + "-" + i->second.cf_name + "-access_count_stats.txt";
-      std::ofstream access_count_file (access_count_path, std::ofstream::out);
+    if (analyzer_opts_.output_access_count_stats) {
+      std::string access_count_path =
+          output_path_ + "/" + analyzer_opts_.output_prefix + "-" +
+          i->second.cf_name + "-access_count_stats.txt";
+      std::ofstream access_count_file(access_count_path, std::ofstream::out);
       if (!access_count_file.is_open()) {
         fprintf(stderr, "Cannot open the access count stats output file\n");
         exit(1);
       }
-      for(auto it = i->second.access_count_stats.begin(); it != i->second.access_count_stats.end(); it++) {
-      access_count_file << "access_count: " << it->first << " nums: " << it->second << "\n";
+      for (auto it = i->second.access_count_stats.begin();
+           it != i->second.access_count_stats.end(); it++) {
+        access_count_file << "access_count: " << it->first
+                          << " nums: " << it->second << "\n";
       }
       access_count_file.close();
     }
@@ -374,12 +382,7 @@ Status TraceAnalyzer::MakeStatistics() {
   return Status::OK();
 }
 
-
-Status TraceAnalyzer::ReProcessing() {
-  return Status::OK();
-}
-
-
+Status TraceAnalyzer::ReProcessing() { return Status::OK(); }
 
 // End the processing, print the requested results
 Status TraceAnalyzer::EndProcessing() {
@@ -387,9 +390,9 @@ Status TraceAnalyzer::EndProcessing() {
   return Status::OK();
 }
 
-
 // add the trace access count to the map
-Status TraceAnalyzer::TraceStatsInsertionGet(TraceUnit &unit, TraceStats& stats) {
+Status TraceAnalyzer::TraceStatsInsertionGet(TraceUnit &unit,
+                                             TraceStats &stats) {
   StatsUnit stats_unit;
   stats_unit.cf_id = stats.cf_id;
   stats_unit.value_size = unit.value_size;
@@ -404,34 +407,33 @@ Status TraceAnalyzer::TraceStatsInsertionGet(TraceUnit &unit, TraceStats& stats)
   return Status::OK();
 }
 
-
-
 void TraceAnalyzer::PrintGetStatistics() {
   uint64_t total_key_num = 0;
-  for(auto i = get_map_.begin(); i != get_map_.end(); i++) {
+  for (auto i = get_map_.begin(); i != get_map_.end(); i++) {
     total_key_num += static_cast<uint64_t>(i->second.key_stats.size());
     std::cout << "*********************************************************\n";
-    std::cout << "colume family name: " << i->second.cf_name << " cf_id: "
-              << i->second.cf_id << "\n";
-    std::cout << "Total keys of this colume family: " << i->second.key_stats.size() << "\n";
+    std::cout << "colume family name: " << i->second.cf_name
+              << " cf_id: " << i->second.cf_id << "\n";
+    std::cout << "Total keys of this colume family: "
+              << i->second.key_stats.size() << "\n";
     printf("Total requests: %" PRIu64 " Total gets: %" PRIu64 "\n",
-          i->second.total_count, i->second.get_count);
+           i->second.total_count, i->second.get_count);
     if (analyzer_opts_.print_key_distribution) {
       std::cout << "The key size distribution\n";
-      for(auto it = i->second.key_size_stats.begin(); it != i->second.key_size_stats.end(); it++) {
-        std::cout << "key size: " << it->first << " nums: " << it->second <<"\n";
+      for (auto it = i->second.key_size_stats.begin();
+           it != i->second.key_size_stats.end(); it++) {
+        std::cout << "key size: " << it->first << " nums: " << it->second
+                  << "\n";
       }
     }
   }
 
-
-
-  if(analyzer_opts_.print_overall_stats) {
-  std::cout << "*********************************************************\n";
+  if (analyzer_opts_.print_overall_stats) {
+    std::cout << "*********************************************************\n";
     std::cout << "total_reqeusts: " << total_requests
               << " total_get: " << total_get
               << " total_write_batch: " << total_write_batch
-              << " total_keys: "<< total_key_num <<"\n";
+              << " total_keys: " << total_key_num << "\n";
   }
 }
 

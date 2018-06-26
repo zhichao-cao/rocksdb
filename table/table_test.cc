@@ -2397,7 +2397,7 @@ TEST_P(BlockBasedTableTest, NoObjectInCacheAfterTableClose) {
               value.Reset();
               pinned_usage = table_options.block_cache->GetPinnedUsage();
               ASSERT_EQ(pinned_usage, 0);
-          }
+            }
           }
         }
       }

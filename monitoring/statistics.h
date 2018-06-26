@@ -39,7 +39,6 @@ enum HistogramsInternal : uint32_t {
   INTERNAL_HISTOGRAM_ENUM_MAX
 };
 
-
 class ALIGN_AS(CACHE_LINE_SIZE) StatisticsImpl : public Statistics {
  public:
   StatisticsImpl(std::shared_ptr<Statistics> stats,
@@ -84,13 +83,14 @@ class ALIGN_AS(CACHE_LINE_SIZE) StatisticsImpl : public Statistics {
                   INTERNAL_HISTOGRAM_ENUM_MAX * sizeof(HistogramImpl)) %
                      CACHE_LINE_SIZE)] ROCKSDB_FIELD_UNUSED;
 #endif
-    void *operator new(size_t s) { return port::cacheline_aligned_alloc(s); }
-    void *operator new[](size_t s) { return port::cacheline_aligned_alloc(s); }
-    void operator delete(void *p) { port::cacheline_aligned_free(p); }
-    void operator delete[](void *p) { port::cacheline_aligned_free(p); }
+    void* operator new(size_t s) { return port::cacheline_aligned_alloc(s); }
+    void* operator new[](size_t s) { return port::cacheline_aligned_alloc(s); }
+    void operator delete(void* p) { port::cacheline_aligned_free(p); }
+    void operator delete[](void* p) { port::cacheline_aligned_free(p); }
   };
 
-  static_assert(sizeof(StatisticsData) % CACHE_LINE_SIZE == 0, "Expected " TOSTRING(CACHE_LINE_SIZE) "-byte aligned");
+  static_assert(sizeof(StatisticsData) % CACHE_LINE_SIZE == 0,
+                "Expected " TOSTRING(CACHE_LINE_SIZE) "-byte aligned");
 
   CoreLocalArray<StatisticsData> per_core_stats_;
 
