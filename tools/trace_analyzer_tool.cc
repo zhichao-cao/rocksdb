@@ -181,7 +181,6 @@ TraceAnalyzer::TraceAnalyzer(std::string &trace_path, std::string &output_path,
   offset_ = 0;
   buffer_ = new char[1024];
   guid_ = 0;
-  cf_id_ = 0;
   total_requests = 0;
   total_keys = 0;
   total_get = 0;
@@ -260,22 +259,24 @@ Status TraceAnalyzer::StartProcessing() {
       unit.key = trace.payload;
       unit.value_size = 0;
       unit.ts = trace.ts;
+      unit.cf_id = trace.cf_id;
       if(get_map_.find(trace.cf_name) == get_map_.end()) {
         TraceStats get_stats;
-        get_stats.cf_id = cf_id_;
+        get_stats.cf_id = trace.cf_id;
         get_stats.cf_name = trace.cf_name;
         get_stats.trace_unit_file = nullptr;
-        unit.cf_id = cf_id_;
+        get_stats.get_count = 1;
+        get_stats.total_count = 1;
         s = TraceStatsInsertionGet(unit, get_stats);
         if (!s.ok()) {
           fprintf(stderr, "Cannot insert the trace unit to the map\n");
           return s;
         }
         get_map_[trace.cf_name] = get_stats;
-        cf_id_++;
       } else {
-        unit.cf_id = get_map_[trace.cf_name].cf_id;
         s = TraceStatsInsertionGet(unit, get_map_[trace.cf_name]);
+        get_map_[trace.cf_name].get_count++;
+        get_map_[trace.cf_name].total_count++;
         if (!s.ok()) {
             fprintf(stderr, "Cannot insert the trace unit to the map\n");
             return s;
@@ -413,6 +414,8 @@ void TraceAnalyzer::PrintGetStatistics() {
     std::cout << "colume family name: " << i->second.cf_name << " cf_id: "
               << i->second.cf_id << "\n";
     std::cout << "Total keys of this colume family: " << i->second.key_stats.size() << "\n";
+    printf("Total requests: %" PRIu64 " Total gets: %" PRIu64 "\n",
+          i->second.total_count, i->second.get_count);
     if (analyzer_opts_.print_key_distribution) {
       std::cout << "The key size distribution\n";
       for(auto it = i->second.key_size_stats.begin(); it != i->second.key_size_stats.end(); it++) {

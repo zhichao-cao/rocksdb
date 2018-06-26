@@ -43,7 +43,7 @@ Status DBImplReadOnly::Get(const ReadOptions& read_options,
     StartTrace(trace_opts, trace_filename);
   }
   if (tracer_) {
-    tracer_->TraceGet(key, cfd->GetName());
+    tracer_->TraceGet(key, cfd->GetName(), cfd->GetID());
   }
   trace_mutex_.Unlock();
 
