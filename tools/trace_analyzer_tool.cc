@@ -40,6 +40,74 @@
 #include "util/trace_replay.h"
 
 namespace rocksdb {
+
+/*
+// write bach handler to be used for WriteBache iterator
+// when processing the write trace
+class TraceWriteHandler : public WriteBatch::Handler {
+ private:
+  TraceAnalyzer * ta_ptr;
+  std::string tmp_use;
+  TraceWriteHandler() { ta_ptr = nullptr; }
+ public:
+  TraceWriteHandler(TraceAnalyzer * _ta_ptr) { ta_ptr = _ta_ptr; }
+  ~TraceWriteHandler() {}
+
+  virtual Status PutCF(uint32_t column_family_id, const Slice& key,
+                         const Slice& value) override {
+    if (ta_ptr->write_map_.find(column_family_id) == ta_ptr->write_map_.end()) {
+      TraceStats write_stats;
+      write_stats.cf_id = column_family_id;
+      ta_ptr->write_map[column_family_id] = write_stats;
+    }
+
+    StatsUnit stats_unit;
+    stats_unit.key_id = 0;
+    stats_unit.cf_id = write_stats.cf_id;
+    stats_unit.value_size = value.size();
+
+
+
+
+    return Status::OK();
+  }
+    virtual Status DeleteCF(uint32_t column_family_id,
+                            const Slice& key) override {
+      return Status::OK();
+    }
+    virtual Status SingleDeleteCF(uint32_t column_family_id,
+                                  const Slice& key) override {
+    }
+    virtual Status DeleteRangeCF(uint32_t column_family_id,
+                                 const Slice& begin_key,
+                                 const Slice& end_key) override {
+      return Status::OK();
+    }
+    virtual Status MergeCF(uint32_t column_family_id, const Slice& key,
+                           const Slice& value) override {
+      return Status::OK();
+    }
+    virtual void LogData(const Slice& blob) override {
+      tmp_use = blob.ToString();
+    }
+    virtual Status MarkBeginPrepare() override {
+      return Status::OK();
+    }
+    virtual Status MarkEndPrepare(const Slice& xid) override {
+      tmp_use = xid.ToString();
+      return Status::OK();
+    }
+    virtual Status MarkCommit(const Slice& xid) override {
+      tmp_use = xid.ToString();
+      return Status::OK();
+    }
+    virtual Status MarkRollback(const Slice& xid) override {
+      tmp_use = xid.ToString();
+      return Status::OK();
+    }
+};
+
+
 TraceOutputWriter::~TraceOutputWriter() { file_writer_.reset(); }
 
 Status TraceOutputWriter::WriteHeader() { return Status::OK(); }
@@ -58,8 +126,9 @@ Status TraceOutputWriter::WriteTraceUnit(TraceUnit &unit) {
   s = file_writer_->Append(Slice(content));
   return s;
 }
+*/
 
-std::string TraceOutputWriter::MicrosdToDate(uint64_t time_in) {
+std::string TraceAnalyzer::MicrosdToDate(uint64_t time_in) {
   time_t tx = static_cast<time_t>(time_in / 1000000);
   int rest = static_cast<int>(time_in % 1000000);
   std::string date_time(ctime(&tx));
@@ -68,7 +137,7 @@ std::string TraceOutputWriter::MicrosdToDate(uint64_t time_in) {
   return date_time;
 }
 
-std::string TraceOutputWriter::StringToHex(const std::string &input) {
+std::string TraceAnalyzer::StringToHex(const std::string &input) {
   static const char *const lut = "0123456789ABCDEF";
   size_t len = input.length();
 
@@ -86,6 +155,7 @@ AnalyzerOptions::AnalyzerOptions() {
   output_key_stats = false;
   output_access_count_stats = false;
   output_trace_unit = false;
+  output_time_serial = false;
   use_get = true;
   use_put = false;
   use_delete = false;
@@ -93,8 +163,11 @@ AnalyzerOptions::AnalyzerOptions() {
   print_overall_stats = false;
   print_key_distribution = false;
   print_value_distribution = false;
+  print_top_k_access = false;
   output_ignore_count = 0;
+  start_time = 0;
   value_interval = 128;
+  top_k = 0;
   output_prefix = "/trace_output";
 }
 
@@ -137,11 +210,11 @@ Status TraceAnalyzer::PrepareProcessing() {
     return Status::OK();
   }
 
+  /*
   std::string output_name;
-  output_name = output_path_ + "/" +analyzer_opts_.output_prefix +"-trace_unit.txt";
-  unique_ptr<WritableFile> output_file;
-  s = env_->NewWritableFile(output_name, &output_file, env_options);
-  if (!s.ok()) {
+  output_name = output_path_ + "/" +analyzer_opts_.output_prefix
+  +"-trace_unit.txt"; unique_ptr<WritableFile> output_file; s =
+  env_->NewWritableFile(output_name, &output_file, env_options); if (!s.ok()) {
     return s;
   }
   unique_ptr<WritableFileWriter> output_file_writer;
@@ -149,6 +222,7 @@ Status TraceAnalyzer::PrepareProcessing() {
       new WritableFileWriter(std::move(output_file), env_options));
   trace_output_writer_.reset(
       new TraceOutputWriter(env_, std::move(output_file_writer)));
+  */
 
   return Status::OK();
 }
@@ -190,6 +264,7 @@ Status TraceAnalyzer::StartProcessing() {
         TraceStats get_stats;
         get_stats.cf_id = cf_id_;
         get_stats.cf_name = trace.cf_name;
+        get_stats.trace_unit_file = nullptr;
         unit.cf_id = cf_id_;
         s = TraceStatsInsertionGet(unit, get_stats);
         if (!s.ok()) {
@@ -206,12 +281,20 @@ Status TraceAnalyzer::StartProcessing() {
             return s;
         }
       }
-    }
-    if (analyzer_opts_.output_trace_unit) {
-      s = trace_output_writer_->WriteTraceUnit(unit);
-      if (!s.ok()) {
+
+      if (analyzer_opts_.output_trace_unit) {
+        if (get_map_[trace.cf_name].trace_unit_file == nullptr) {
+          std::string trace_file_name =
+              output_path_ + "/" + analyzer_opts_.output_prefix + "-" +
+              get_map_[trace.cf_name].cf_name + "-trace_unit.txt";
+          get_map_[trace.cf_name].trace_unit_file =
+              fopen(trace_file_name.c_str(), "w");
+        }
+        s = TraceUnitWriter(get_map_[trace.cf_name].trace_unit_file, unit);
+        if (!s.ok()) {
           fprintf(stderr, "Cannot write the trace unit to the file\n");
           return s;
+        }
       }
     }
   }
@@ -227,7 +310,11 @@ Status TraceAnalyzer::StartProcessing() {
 
 Status TraceAnalyzer::MakeStatistics() {
   for(auto i = get_map_.begin(); i != get_map_.end(); i++) {
-   uint64_t keyid = 0;
+    if (i->second.trace_unit_file != nullptr) {
+      fclose(i->second.trace_unit_file);
+    }
+
+    uint64_t keyid = 0;
     for(auto it = i->second.key_stats.begin(); it != i->second.key_stats.end(); it++) {
       it->second.key_id = keyid;
       keyid++;
@@ -287,6 +374,12 @@ Status TraceAnalyzer::MakeStatistics() {
 }
 
 
+Status TraceAnalyzer::ReProcessing() {
+  return Status::OK();
+}
+
+
+
 // End the processing, print the requested results
 Status TraceAnalyzer::EndProcessing() {
   PrintGetStatistics();
@@ -339,8 +432,16 @@ void TraceAnalyzer::PrintGetStatistics() {
   }
 }
 
-
-
+Status TraceAnalyzer::TraceUnitWriter(FILE *file_p, TraceUnit &unit) {
+  if (file_p == nullptr) {
+    return Status::Corruption("Empty file pointer");
+  }
+  std::string hex_key = StringToHex(unit.key);
+  uint64_t ts = unit.ts;
+  fprintf(file_p, "%u %u %zu %" PRIu64 " %s\n", unit.type, unit.cf_id,
+          unit.value_size, ts, hex_key.c_str());
+  return Status::OK();
+}
 
 namespace {
 
@@ -359,6 +460,8 @@ void print_help() {
         Output the access count distribution statistics to file
       --output_trace_unit
         Output the trace unit to file for further analyze
+      --output_time_serial=<trace collect time>
+        Output the access time sequence of keys with key space of GET
       --use_get
         Analyze the GET operations
       --use_put
@@ -403,6 +506,11 @@ int TraceAnalyzerTool::Run(int argc, char **argv) {
       analyzer_opts.output_access_count_stats = true;
     } else if (strncmp(argv[i], "--output_trace_unit", 19) == 0) {
       analyzer_opts.output_trace_unit = true;
+    } else if (strncmp(argv[i], "--output_time_serial=", 21) == 0) {
+      std::string::size_type sz = 0;
+      std::string tmp = argv[i] + 21;
+      analyzer_opts.start_time = std::stoull(tmp, &sz, 0);
+      analyzer_opts.output_time_serial = true;
     } else if (strncmp(argv[i], "--use_get", 9) == 0) {
       analyzer_opts.use_get = true;
     } else if (strncmp(argv[i], "--use_put", 9) == 0) {
@@ -415,6 +523,10 @@ int TraceAnalyzerTool::Run(int argc, char **argv) {
       analyzer_opts.print_overall_stats = true;
     } else if (strncmp(argv[i], "--print_key_distribution", 24) == 0) {
       analyzer_opts.print_key_distribution = true;
+    } else if (strncmp(argv[i], "--print_top_k_access", 20) == 0) {
+      std::string tmp = argv[i] + 20;
+      analyzer_opts.top_k = std::stoi(tmp);
+      analyzer_opts.print_top_k_access = true;
     } else if (strncmp(argv[i], "--output_ignore_count=", 22) == 0) {
       std::string tmp = argv[i] + 22;
       analyzer_opts.output_ignore_count = std::stoi(tmp);

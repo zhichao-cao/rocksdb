@@ -8,10 +8,12 @@
 
 #include "rocksdb/trace_analyzer_tool.h"
 
+#include <stdio.h>
+#include <fstream>
 #include <list>
 #include <map>
-#include <utility>
 #include <set>
+#include <utility>
 
 #include "rocksdb/env.h"
 #include "util/trace_replay.h"
@@ -22,12 +24,11 @@ class DBImpl;
 class WriteBatch;
 class AnalyzerOptions;
 class TraceAnalyzer;
-class TraceOutputWriter;
 
 struct TraceUnit {
   uint32_t type;
   std::string key;
-  uint64_t value_size;
+  size_t value_size;
   uint64_t ts;
   uint32_t cf_id;
 };
@@ -35,56 +36,8 @@ struct TraceUnit {
 struct StatsUnit {
   uint64_t key_id;
   uint32_t cf_id;
-  uint64_t value_size;
+  size_t value_size;
   uint64_t access_count;
-};
-
-// write bach handler to be used for WriteBache iterator
-// when processing the write trace
-struct TraceWriteHandler : public WriteBatch::Handler {
-  TraceAnalyzer * ta_ptr;
-  TraceWriteHandler() { ta_ptr = nullptr; }
-  TraceWriteHandler(TraceAnalyzer * _ta_ptr) { ta_ptr = _ta_ptr; }
-  ~TraceWriteHandler() {}
-
-  virtual Status PutCF(uint32_t column_family_id, const Slice& key,
-                         const Slice& value) override {
-
-    return Status::OK();
-  }
-    virtual Status DeleteCF(uint32_t column_family_id,
-                            const Slice& key) override {
-      return Status::OK();
-    }
-    virtual Status SingleDeleteCF(uint32_t column_family_id,
-                                  const Slice& key) override {
-    }
-    virtual Status DeleteRangeCF(uint32_t column_family_id,
-                                 const Slice& begin_key,
-                                 const Slice& end_key) override {
-      return Status::OK();
-    }
-    virtual Status MergeCF(uint32_t column_family_id, const Slice& key,
-                           const Slice& value) override {
-      return Status::OK();
-    }
-    virtual void LogData(const Slice& blob) override {
-    }
-    virtual Status MarkBeginPrepare() override {
-      return Status::OK();
-    }
-    virtual Status MarkEndPrepare(const Slice& xid) override {
-      return Status::OK();
-    }
-    virtual Status MarkNoop(bool empty_batch) override {
-      return Status::OK();
-    }
-    virtual Status MarkCommit(const Slice& xid) override {
-      return Status::OK();
-    }
-    virtual Status MarkRollback(const Slice& xid) override {
-      return Status::OK();
-    }
 };
 
 class AnalyzerOptions {
@@ -92,6 +45,7 @@ class AnalyzerOptions {
   bool output_key_stats;
   bool output_access_count_stats;
   bool output_trace_unit;
+  bool output_time_serial;
   bool use_get;
   bool use_put;
   bool use_delete;
@@ -99,8 +53,11 @@ class AnalyzerOptions {
   bool print_overall_stats;
   bool print_key_distribution;
   bool print_value_distribution;
+  bool print_top_k_access;
   uint64_t  output_ignore_count;
+  uint64_t start_time;
   int  value_interval;
+  int top_k;
   std::string output_prefix;
 
   AnalyzerOptions();
@@ -116,6 +73,7 @@ struct TraceStats {
   std::map<uint64_t, uint64_t> access_count_stats;
   std::map<uint64_t, uint64_t> key_size_stats;
   std::map<uint64_t, uint64_t> value_size_stats;
+  FILE *trace_unit_file;
 };
 
 
@@ -131,9 +89,11 @@ class TraceAnalyzer {
 
   Status MakeStatistics();
 
-  Status WriteStatistics();
+  Status ReProcessing();
 
   Status EndProcessing();
+
+  Status WriteTraceUnit(TraceUnit &unit);
 
   uint64_t total_requests;
   uint64_t total_keys;
@@ -143,7 +103,6 @@ class TraceAnalyzer {
  private:
   Env *env_;
   unique_ptr<rocksdb::TraceReader> trace_reader_;
-  unique_ptr<rocksdb::TraceOutputWriter> trace_output_writer_;
   size_t offset_;
   char *buffer_;
   uint64_t guid_;
@@ -159,8 +118,12 @@ class TraceAnalyzer {
   Status TraceStatsInsertionWrite(TraceUnit &unit, TraceStats& stats);
 
   void PrintGetStatistics();
+  Status TraceUnitWriter(FILE *file_p, TraceUnit &unit);
+  std::string MicrosdToDate(uint64_t time);
+  std::string StringToHex(const std::string &input);
 };
 
+/*
 class TraceOutputWriter {
  public:
   TraceOutputWriter(Env *env, std::unique_ptr<WritableFileWriter> &&file_writer)
@@ -170,13 +133,12 @@ class TraceOutputWriter {
   Status WriteHeader();
   Status WriteFooter();
   Status WriteTraceUnit(TraceUnit &unit);
-  std::string MicrosdToDate(uint64_t time);
-  std::string StringToHex(const std::string &input);
 
  private:
   Env *env_;
   unique_ptr<WritableFileWriter> file_writer_;
 };
+*/
 
 }  // namespace rocksdb
 
