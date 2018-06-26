@@ -314,7 +314,8 @@ LDBCommand::LDBCommand(const std::map<std::string, std::string>& options,
 void LDBCommand::OpenDB() {
   if (!create_if_missing_ && try_load_options_) {
     Status s = LoadLatestOptions(db_path_, Env::Default(), &options_,
-                                 &column_families_, ignore_unknown_options_);
+                                 &column_families_, ignore_unknown_options_,
+                                 ldb_options_.comparator_map);
     if (!s.ok() && !s.IsNotFound()) {
       // Option file exists but load option file error.
       std::string msg = s.ToString();

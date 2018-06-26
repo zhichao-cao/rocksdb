@@ -3,11 +3,14 @@
 ### Public API Change
 * For users of `Statistics` objects created via `CreateDBStatistics()`, the format of the string returned by its `ToString()` method has changed.
 * With LRUCache, when high_pri_pool_ratio > 0, midpoint insertion strategy will be enabled to put low-pri items to the tail of low-pri list (the midpoint) when they first inserted into the cache. This is to make cache entries never get hit age out faster, improving cache efficiency when large background scan presents.
+* LDBCommandRunner::RunCommand() returns an error code instead of directly exiting.
 
 ### New Features
 * Changes the format of index blocks by storing the key in their raw form rather than converting them to InternalKey. This saves 8 bytes per index key. The feature is backward compatbile but not forward compatible. It is disabled by default unless format_version 3 or above is used.
 * Improve the performance of iterators doing long range scans by using readahead, when using direct IO.
 * pin_top_level_index_and_filter (default true) in BlockBasedTableOptions can be used in combination with cache_index_and_filter_blocks to prefetch and pin the top-level index of partitioned index and filter blocks in cache. It has no impact when cache_index_and_filter_blocks is false.
+* Allow LDBTool to specify a comparator name to comparator map so that customized ldb can automatically figure out which comparator to use when loading from option files.
+* LoadLatestOptions() and LoadOptionsFromFile() allows an optional comparator map so that comparators of loaded options can be set.
 
 ### Bug Fixes
 * fix deadlock with enable_pipelined_write=true and max_successive_merges > 0
