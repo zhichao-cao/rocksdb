@@ -69,6 +69,8 @@ class AnalyzerOptions {
 struct TraceStats {
   uint32_t cf_id;
   std::string cf_name;
+  uint64_t get_count;
+  uint64_t total_count;
   std::map<std::string, StatsUnit> key_stats;
   std::map<uint64_t, uint64_t> access_count_stats;
   std::map<uint64_t, uint64_t> key_size_stats;
@@ -106,7 +108,6 @@ class TraceAnalyzer {
   size_t offset_;
   char *buffer_;
   uint64_t guid_;
-  int cf_id_;
   std::string trace_name_;
   std::string output_path_;
   bool need_output_;
