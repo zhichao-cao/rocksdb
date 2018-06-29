@@ -12,6 +12,7 @@
 #include <fstream>
 #include <list>
 #include <map>
+#include <queue>
 #include <set>
 #include <utility>
 
@@ -40,16 +41,26 @@ struct StatsUnit {
   uint64_t access_count;
 };
 
+/*
+bool topk_comparator_greater(const std::pair<uint64_t, std::string> &pa,
+                  const std::pair<uint64_t, std::string>& pb) {
+    return pa.first > pb.first;
+}
+*/
+
 class AnalyzerOptions {
  public:
   bool output_key_stats;
   bool output_access_count_stats;
   bool output_trace_unit;
   bool output_time_serial;
+  bool output_prefix_cut;
+  bool input_key_space;
   bool use_get;
   bool use_put;
   bool use_delete;
   bool use_merge;
+  bool no_key;
   bool print_overall_stats;
   bool print_key_distribution;
   bool print_value_distribution;
@@ -58,7 +69,9 @@ class AnalyzerOptions {
   uint64_t start_time;
   int  value_interval;
   int top_k;
+  int prefix_cut;
   std::string output_prefix;
+  std::string key_space_dir;
 
   AnalyzerOptions();
 
@@ -71,10 +84,15 @@ struct TraceStats {
   std::string cf_name;
   uint64_t get_count;
   uint64_t total_count;
+  uint64_t whole_key_space_count;
   std::map<std::string, StatsUnit> key_stats;
   std::map<uint64_t, uint64_t> access_count_stats;
   std::map<uint64_t, uint64_t> key_size_stats;
   std::map<uint64_t, uint64_t> value_size_stats;
+  std::priority_queue<std::pair<uint64_t, std::string>,
+                      std::vector<std::pair<uint64_t, std::string>>,
+                      std::greater<std::pair<uint64_t, std::string>>> top_k_queue;
+  std::list<TraceUnit> time_serial;
   FILE *trace_unit_file;
 };
 
@@ -121,7 +139,7 @@ class TraceAnalyzer {
   void PrintGetStatistics();
   Status TraceUnitWriter(FILE *file_p, TraceUnit &unit);
   std::string MicrosdToDate(uint64_t time);
-  std::string StringToHex(const std::string &input);
+  //std::string StringToHex(const std::string &input);
 };
 
 /*
