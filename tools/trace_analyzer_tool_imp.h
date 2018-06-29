@@ -41,12 +41,6 @@ struct StatsUnit {
   uint64_t access_count;
 };
 
-/*
-bool topk_comparator_greater(const std::pair<uint64_t, std::string> &pa,
-                  const std::pair<uint64_t, std::string>& pb) {
-    return pa.first > pb.first;
-}
-*/
 
 class AnalyzerOptions {
  public:
@@ -115,6 +109,16 @@ class TraceAnalyzer {
 
   Status WriteTraceUnit(TraceUnit &unit);
 
+  /*
+  // The write batch processing functions
+  Status DealPutCF(uint32_t column_family_id, const Slice& key, const Slice& value);
+  Status DealDeleteCF(uint32_t column_family_id, const Slice& key);
+  Status DealSingleDeleteCF(uint32_t column_family_id, const Slice& key);
+  Status DealDeleteRangeCF(uint32_t column_family_id, const Slice& begin_key,
+        const Slice& end_key);
+  Status DealMergeCF(uint32_t column_family_id, const Slice& key, const Slice& value);
+  */
+
   uint64_t total_requests;
   uint64_t total_keys;
   uint64_t total_get;
@@ -139,25 +143,7 @@ class TraceAnalyzer {
   void PrintGetStatistics();
   Status TraceUnitWriter(FILE *file_p, TraceUnit &unit);
   std::string MicrosdToDate(uint64_t time);
-  //std::string StringToHex(const std::string &input);
 };
-
-/*
-class TraceOutputWriter {
- public:
-  TraceOutputWriter(Env *env, std::unique_ptr<WritableFileWriter> &&file_writer)
-      : env_(env), file_writer_(std::move(file_writer)) {}
-  ~TraceOutputWriter();
-
-  Status WriteHeader();
-  Status WriteFooter();
-  Status WriteTraceUnit(TraceUnit &unit);
-
- private:
-  Env *env_;
-  unique_ptr<WritableFileWriter> file_writer_;
-};
-*/
 
 }  // namespace rocksdb
 

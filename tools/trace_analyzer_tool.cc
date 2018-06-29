@@ -56,37 +56,24 @@ class TraceWriteHandler : public WriteBatch::Handler {
 
   virtual Status PutCF(uint32_t column_family_id, const Slice& key,
                          const Slice& value) override {
-    if (ta_ptr->write_map_.find(column_family_id) == ta_ptr->write_map_.end()) {
-      TraceStats write_stats;
-      write_stats.cf_id = column_family_id;
-      ta_ptr->write_map[column_family_id] = write_stats;
-    }
-
-    StatsUnit stats_unit;
-    stats_unit.key_id = 0;
-    stats_unit.cf_id = write_stats.cf_id;
-    stats_unit.value_size = value.size();
-
-
-
-
-    return Status::OK();
+    return ta_ptr->DealPutCF(column_family_id, key, value);
   }
     virtual Status DeleteCF(uint32_t column_family_id,
                             const Slice& key) override {
-      return Status::OK();
+      return ta_ptr->DealDeleteCF(column_family_id, key, value);
     }
     virtual Status SingleDeleteCF(uint32_t column_family_id,
                                   const Slice& key) override {
+      return ta_ptr->DealDeleteCF(column_family_id, key);
     }
     virtual Status DeleteRangeCF(uint32_t column_family_id,
                                  const Slice& begin_key,
                                  const Slice& end_key) override {
-      return Status::OK();
+      return ta_ptr->DealDeleteRangeCF(column_family_id, begin_key, end_key);
     }
     virtual Status MergeCF(uint32_t column_family_id, const Slice& key,
                            const Slice& value) override {
-      return Status::OK();
+      return ta_ptr->DealMergeCF(column_family_id, key, value);
     }
     virtual void LogData(const Slice& blob) override {
       tmp_use = blob.ToString();
@@ -109,25 +96,35 @@ class TraceWriteHandler : public WriteBatch::Handler {
 };
 
 
-TraceOutputWriter::~TraceOutputWriter() { file_writer_.reset(); }
+Status TraceAnalyzer::DealPutCF(uint32_t column_family_id,
+                                const Slice& key,
+                                const Slice& value) {
 
-Status TraceOutputWriter::WriteHeader() { return Status::OK(); }
+}
 
-Status TraceOutputWriter::WriteFooter() { return Status::OK(); }
+Status TraceAnalyzer::DealDeleteCF(uint32_t column_family_id,
+                                  const Slice& key) {
 
-Status TraceOutputWriter::WriteTraceUnit(TraceUnit &unit) {
-  Status s;
-  std::ostringstream out_format;
-  out_format << unit.type << "\t" << unit.cf_id
-             << "\t" << unit.value_size << "\t" << unit.key.size() << "\t"
-             << MicrosdToDate(unit.ts) << "\t" << StringToHex(unit.key) << "\n";
-  std::string content(out_format.str());
-  std::cout << content;
+}
 
-  s = file_writer_->Append(Slice(content));
-  return s;
+Status TraceAnalyzer::DealSingleDeleteCF(uint32_t column_family_id,
+                                        const Slice& key) {
+
+}
+
+Status TraceAnalyzer::DealDeleteRangeCF(uint32_t column_family_id,
+                                        const Slice& begin_key,
+                                        const Slice& end_key) {
+
+}
+
+Status TraceAnalyzer::DealMergeCF(uint32_t column_family_id,
+                                  const Slice& key,
+                                  const Slice& value) {
+
 }
 */
+
 
 std::string TraceAnalyzer::MicrosdToDate(uint64_t time_in) {
   time_t tx = static_cast<time_t>(time_in / 1000000);
@@ -138,31 +135,6 @@ std::string TraceAnalyzer::MicrosdToDate(uint64_t time_in) {
   return date_time;
 }
 
-/*
-std::string TraceAnalyzer::StringToHex(const std::string &input) {
-  static const char *const lut = "0123456789ABCDEF";
-  size_t len = input.length();
-
-  std::string output;
-  output.reserve(2 * len);
-  for (size_t i = 0; i < len; ++i) {
-    const unsigned char c = input[i];
-    output.push_back(lut[c >> 4]);
-    output.push_back(lut[c & 15]);
-  }
-  return output;
-}
-
-std::string HexToString(const std::string &input) {
-  int len = input.length();
-  std::string newString;
-  for(int i = 2; i < len; i += 2) {
-    string byte = hex.substr(i,2);
-    char chr = static_cast<char>(static_cast<int>(strtol(byte.c_str(), null, 16)));
-    newString.push_back(chr);
-  }
-}
-*/
 
 AnalyzerOptions::AnalyzerOptions() {
   output_key_stats = false;
