@@ -182,9 +182,8 @@ class TraceAnalyzer {
                            const std::string& key, const size_t value_size,
                            const uint64_t ts);
   Status OpenStatsOutputFiles(const std::string& type, TraceStats& new_stats);
-  Status CreateOutputFile(FILE* f_ptr, const std::string& type,
-                          const std::string& cf_name,
-                          const std::string& ending);
+  FILE* CreateOutputFile(const std::string& type, const std::string& cf_name,
+                         const std::string& ending);
   void CloseOutputFiles();
 
   void PrintGetStatistics();

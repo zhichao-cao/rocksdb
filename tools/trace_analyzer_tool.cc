@@ -60,7 +60,7 @@ AnalyzerOptions::AnalyzerOptions() {
   output_prefix_cut = false;
   output_trace_sequence = false;
   input_key_space = false;
-  use_get = true;
+  use_get = false;
   use_put = false;
   use_delete = false;
   use_single_delete = false;
@@ -115,6 +115,7 @@ TraceAnalyzer::TraceAnalyzer(std::string &trace_path, std::string &output_path,
   total_gets_ = 0;
   total_writes_ = 0;
   trace_sequence_f = nullptr;
+  ta_.resize(taTypeNum);
   ta_[0].type_name = "get";
   if (_analyzer_opts.use_get) {
     ta_[0].enabled = true;
@@ -222,7 +223,7 @@ Status TraceAnalyzer::StartProcessing() {
       total_gets_++;
       s = HandleGetCF(0, trace.payload, trace.ts);
       if (!s.ok()) {
-        fprintf(stderr, "Cannot process the write batch in the trace\n");
+        fprintf(stderr, "Cannot process the get in the trace\n");
         exit(1);
       }
     }
@@ -237,6 +238,7 @@ Status TraceAnalyzer::StartProcessing() {
 
 
 Status TraceAnalyzer::MakeStatistics() {
+  int ret;
   for (int type = 0; type < taTypeNum; type++) {
     if (!ta_[type].enabled) {
       continue;
@@ -275,16 +277,26 @@ Status TraceAnalyzer::MakeStatistics() {
         std::string prefix;
         for (auto it = i->second.a_key_stats.begin();
              it != i->second.a_key_stats.end(); it++) {
-          fprintf(i->second.a_key_f, "%u %zu %" PRIu64 " %" PRIu64 "\n",
-                  it->second.cf_id, it->second.value_size, it->second.key_id,
-                  it->second.access_count);
+          if (i->second.a_key_f == nullptr) {
+            fprintf(stderr, "The accessed_key_stats file is not opend\n");
+            exit(1);
+          }
+          ret = fprintf(i->second.a_key_f, "%u %zu %" PRIu64 " %" PRIu64 "\n",
+                        it->second.cf_id, it->second.value_size,
+                        it->second.key_id, it->second.access_count);
+          if (ret < 0) {
+            return Status::IOError("write file failed");
+          }
           if (analyzer_opts_.output_prefix_cut &&
               i->second.a_prefix_cut_f != nullptr) {
             if (it->first.compare(0, analyzer_opts_.prefix_cut, prefix) != 0) {
               prefix = it->first.substr(0, analyzer_opts_.prefix_cut);
               std::string prefix_out = rocksdb::LDBCommand::StringToHex(prefix);
-              fprintf(i->second.a_prefix_cut_f, "%" PRIu64 " %s\n",
-                      it->second.key_id, prefix_out.c_str());
+              ret = fprintf(i->second.a_prefix_cut_f, "%" PRIu64 " %s\n",
+                            it->second.key_id, prefix_out.c_str());
+              if (ret < 0) {
+                return Status::IOError("write file failed");
+              }
             }
           }
         }
@@ -294,9 +306,12 @@ Status TraceAnalyzer::MakeStatistics() {
           i->second.a_count_dist_f != nullptr) {
         for (auto it = i->second.a_count_stats.begin();
              it != i->second.a_count_stats.end(); it++) {
-          fprintf(i->second.a_count_dist_f,
-                  "access_count: %" PRIu64 " num: %" PRIu64 "\n", it->first,
-                  it->second);
+          ret = fprintf(i->second.a_count_dist_f,
+                        "access_count: %" PRIu64 " num: %" PRIu64 "\n",
+                        it->first, it->second);
+          if (ret < 0) {
+            return Status::IOError("write file failed");
+          }
         }
       }
     }
@@ -311,25 +326,33 @@ Status TraceAnalyzer::MakeStatistics() {
 // also, we output the top k accessed keys here
 //
 Status TraceAnalyzer::ReProcessing() {
+  int ret;
   for (auto cf_it = cfs_.begin(); cf_it != cfs_.end(); cf_it++) {
     uint32_t cf_id = cf_it->first;
 
     // output the time serial;
     if(analyzer_opts_.output_time_serial) {
       for (int i = 0; i < taTypeNum; i++) {
-        if (!ta_[i].enabled) {
+        if (!ta_[i].enabled || ta_[i].stats.find(cf_id) == ta_[i].stats.end()) {
           continue;
         }
         TraceStats& stats = ta_[i].stats[cf_id];
+        if (stats.time_serial_f == nullptr) {
+          fprintf(stderr, "Cannot write time_serial of '%s' in '%u'\n",
+                  ta_[i].type_name.c_str(), cf_id);
+        }
         while (!stats.time_serial.empty()) {
           uint64_t key_id = 0;
           auto found = stats.a_key_stats.find(stats.time_serial.front().key);
           if (found != stats.a_key_stats.end()) {
             key_id = found->second.key_id;
           }
-          fprintf(stats.time_serial_f, "%u %" PRIu64 " %" PRIu64 "\n",
-                  stats.time_serial.front().type, stats.time_serial.front().ts,
-                  key_id);
+          ret = fprintf(stats.time_serial_f, "%u %" PRIu64 " %" PRIu64 "\n",
+                        stats.time_serial.front().type,
+                        stats.time_serial.front().ts, key_id);
+          if (ret < 0) {
+            return Status::IOError("Cannot write file");
+          }
           stats.time_serial.pop_front();
         }
       }
@@ -355,9 +378,12 @@ Status TraceAnalyzer::ReProcessing() {
             if (stats.w_key_f != nullptr) {
               if (stats.a_key_stats.find(input_key) !=
                   stats.a_key_stats.end()) {
-                fprintf(stats.w_key_f, "%" PRIu64 " %" PRIu64 "\n",
-                        cfs_[cf_id].w_count,
-                        stats.a_key_stats[input_key].access_count);
+                ret = fprintf(stats.w_key_f, "%" PRIu64 " %" PRIu64 "\n",
+                              cfs_[cf_id].w_count,
+                              stats.a_key_stats[input_key].access_count);
+                if (ret < 0) {
+                  return Status::IOError("Cannot write file");
+                }
               }
             }
             if (analyzer_opts_.output_prefix_cut &&
@@ -367,8 +393,11 @@ Status TraceAnalyzer::ReProcessing() {
                 prefix = input_key.substr(0, analyzer_opts_.prefix_cut);
                 std::string prefix_out =
                     rocksdb::LDBCommand::StringToHex(prefix);
-                fprintf(stats.w_prefix_cut_f, "%" PRIu64 " %s\n",
-                        cfs_[cf_id].w_count, prefix_out.c_str());
+                ret = fprintf(stats.w_prefix_cut_f, "%" PRIu64 " %s\n",
+                              cfs_[cf_id].w_count, prefix_out.c_str());
+                if (ret < 0) {
+                  return Status::IOError("Cannot write file");
+                }
               }
             }
           }
@@ -389,7 +418,7 @@ Status TraceAnalyzer::ReProcessing() {
     // process the top k accessed keys
     if (analyzer_opts_.print_top_k_access) {
       for (int i = 0; i < taTypeNum; i++) {
-        if (!ta_[i].enabled) {
+        if (!ta_[i].enabled || ta_[i].stats.find(cf_id) == ta_[i].stats.end()) {
           continue;
         }
         TraceStats& stats = ta_[i].stats[cf_id];
@@ -483,55 +512,55 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
 // the trace analyzer options
 Status TraceAnalyzer::OpenStatsOutputFiles(const std::string& type,
                                            TraceStats& new_stats) {
-  Status s;
   if (analyzer_opts_.output_key_stats) {
-    s = CreateOutputFile(new_stats.a_key_f, type, new_stats.cf_name,
-                         "accessed_key_stats.txt");
+    new_stats.a_key_f =
+        CreateOutputFile(type, new_stats.cf_name, "accessed_key_stats.txt");
     if (analyzer_opts_.input_key_space) {
-      s = CreateOutputFile(new_stats.w_key_f, type, new_stats.cf_name,
-                           "whole_key_stats.txt");
+      new_stats.w_key_f =
+          CreateOutputFile(type, new_stats.cf_name, "whole_key_stats.txt");
     }
   }
 
   if (analyzer_opts_.output_access_count_stats) {
-    s = CreateOutputFile(new_stats.a_count_dist_f, type, new_stats.cf_name,
-                         "accessed_key_count_distribution.txt");
+    new_stats.a_count_dist_f = CreateOutputFile(
+        type, new_stats.cf_name, "accessed_key_count_distribution.txt");
   }
 
   if (analyzer_opts_.output_prefix_cut) {
-    s = CreateOutputFile(new_stats.a_prefix_cut_f, type, new_stats.cf_name,
-                         "accessed_key_prefix_cut.txt");
+    new_stats.a_prefix_cut_f = CreateOutputFile(type, new_stats.cf_name,
+                                                "accessed_key_prefix_cut.txt");
     if (analyzer_opts_.input_key_space) {
-      s = CreateOutputFile(new_stats.w_prefix_cut_f, type, new_stats.cf_name,
-                           "whole_key_prefix_cut.txt");
+      new_stats.w_prefix_cut_f =
+          CreateOutputFile(type, new_stats.cf_name, "whole_key_prefix_cut.txt");
     }
   }
 
   if (analyzer_opts_.output_time_serial) {
-    s = CreateOutputFile(new_stats.time_serial_f, type, new_stats.cf_name,
-                         "time_serial.txt");
+    new_stats.time_serial_f =
+        CreateOutputFile(type, new_stats.cf_name, "time_serial.txt");
   }
 
   if (analyzer_opts_.print_key_distribution) {
-    s = CreateOutputFile(new_stats.a_value_size_f, type, new_stats.cf_name,
-                         "accessed_value_size_distribution.txt");
+    new_stats.a_value_size_f = CreateOutputFile(
+        type, new_stats.cf_name, "accessed_value_size_distribution.txt");
   }
   return Status::OK();
 }
 
 // create the output path of the files to be opened
-Status TraceAnalyzer::CreateOutputFile(FILE* f_ptr, const std::string& type,
-                                       const std::string& cf_name,
-                                       const std::string& ending) {
+FILE* TraceAnalyzer::CreateOutputFile(const std::string& type,
+                                      const std::string& cf_name,
+                                      const std::string& ending) {
   std::string path;
+  FILE* f_new;
   path = output_path_ + "/" + analyzer_opts_.output_prefix + "-" + type + "-" +
          cf_name + "-" + ending;
-  f_ptr = fopen(path.c_str(), "w");
-  if (f_ptr == nullptr) {
+  f_new = fopen(path.c_str(), "w");
+  if (f_new == nullptr) {
     fprintf(stderr, "Cannot open file: %s\n", path.c_str());
-    return Status::OK();
+    return nullptr;
   }
-  return Status::OK();
+  return f_new;
 }
 
 // Close the output files in the TraceStats if they are opened
@@ -576,18 +605,20 @@ void TraceAnalyzer::CloseOutputFiles() {
 Status TraceAnalyzer::HandleGetCF(uint32_t column_family_id,
                                   const std::string& key, const uint64_t& ts) {
   Status s;
+  size_t value_size = 0;
+  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
+    s = WriteTraceSequence(taGet, column_family_id, key, value_size, ts);
+    if (!s.ok()) {
+      return Status::Corruption("Failed to write the trace sequence to file");
+    }
+  }
+
   if (!ta_[taGet].enabled) {
     return Status::OK();
   }
-
-  size_t value_size = 0;
   s = KeyStatsInsertion(taGet, column_family_id, key, value_size, ts);
   if (!s.ok()) {
     return Status::Corruption("Failed to insert key statistics");
-  }
-
-  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
-    s = WriteTraceSequence(taGet, column_family_id, key, value_size, ts);
   }
   return s;
 }
@@ -596,20 +627,22 @@ Status TraceAnalyzer::HandleGetCF(uint32_t column_family_id,
 Status TraceAnalyzer::HandlePutCF(uint32_t column_family_id, const Slice& key,
                                   const Slice& value) {
   Status s;
+  size_t value_size = value.ToString().size();
+  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
+    s = WriteTraceSequence(taPut, column_family_id, key.ToString(), value_size,
+                           c_time_);
+    if (!s.ok()) {
+      return Status::Corruption("Failed to write the trace sequence to file");
+    }
+  }
+
   if (!ta_[taPut].enabled) {
     return Status::OK();
   }
-
-  size_t value_size = value.ToString().size();
   s = KeyStatsInsertion(taPut, column_family_id, key.ToString(), value_size,
                         c_time_);
   if (!s.ok()) {
     return Status::Corruption("Failed to insert key statistics");
-  }
-
-  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
-    s = WriteTraceSequence(taPut, column_family_id, key.ToString(), value_size,
-                           c_time_);
   }
   return s;
 }
@@ -618,20 +651,22 @@ Status TraceAnalyzer::HandlePutCF(uint32_t column_family_id, const Slice& key,
 Status TraceAnalyzer::HandleDeleteCF(uint32_t column_family_id,
                                      const Slice& key) {
   Status s;
+  size_t value_size = 0;
+  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
+    s = WriteTraceSequence(taDelete, column_family_id, key.ToString(),
+                           value_size, c_time_);
+    if (!s.ok()) {
+      return Status::Corruption("Failed to write the trace sequence to file");
+    }
+  }
+
   if (!ta_[taDelete].enabled) {
     return Status::OK();
   }
-
-  size_t value_size = 0;
   s = KeyStatsInsertion(taDelete, column_family_id, key.ToString(), value_size,
                         c_time_);
   if (!s.ok()) {
     return Status::Corruption("Failed to insert key statistics");
-  }
-
-  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
-    s = WriteTraceSequence(taDelete, column_family_id, key.ToString(),
-                           value_size, c_time_);
   }
   return s;
 }
@@ -640,20 +675,22 @@ Status TraceAnalyzer::HandleDeleteCF(uint32_t column_family_id,
 Status TraceAnalyzer::HandleSingleDeleteCF(uint32_t column_family_id,
                                            const Slice& key) {
   Status s;
+  size_t value_size = 0;
+  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
+    s = WriteTraceSequence(taSingleDelete, column_family_id, key.ToString(),
+                           value_size, c_time_);
+    if (!s.ok()) {
+      return Status::Corruption("Failed to write the trace sequence to file");
+    }
+  }
+
   if (!ta_[taSingleDelete].enabled) {
     return Status::OK();
   }
-
-  size_t value_size = 0;
   s = KeyStatsInsertion(taSingleDelete, column_family_id, key.ToString(),
                         value_size, c_time_);
   if (!s.ok()) {
     return Status::Corruption("Failed to insert key statistics");
-  }
-
-  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
-    s = WriteTraceSequence(taSingleDelete, column_family_id, key.ToString(),
-                           value_size, c_time_);
   }
   return s;
 }
@@ -663,23 +700,24 @@ Status TraceAnalyzer::HandleDeleteRangeCF(uint32_t column_family_id,
                                           const Slice& begin_key,
                                           const Slice& end_key) {
   Status s;
+  size_t value_size = 0;
+  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
+    s = WriteTraceSequence(taRangeDelete, column_family_id,
+                           begin_key.ToString(), value_size, c_time_);
+    if (!s.ok()) {
+      return Status::Corruption("Failed to write the trace sequence to file");
+    }
+  }
+
   if (!ta_[taRangeDelete].enabled) {
     return Status::OK();
   }
-
-  size_t value_size = 0;
   s = KeyStatsInsertion(taRangeDelete, column_family_id, begin_key.ToString(),
                         value_size, c_time_);
   s = KeyStatsInsertion(taRangeDelete, column_family_id, end_key.ToString(),
                         value_size, c_time_);
-
   if (!s.ok()) {
     return Status::Corruption("Failed to insert key statistics");
-  }
-
-  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
-    s = WriteTraceSequence(taRangeDelete, column_family_id,
-                           begin_key.ToString(), value_size, c_time_);
   }
   return s;
 }
@@ -688,20 +726,22 @@ Status TraceAnalyzer::HandleDeleteRangeCF(uint32_t column_family_id,
 Status TraceAnalyzer::HandleMergeCF(uint32_t column_family_id, const Slice& key,
                                     const Slice& value) {
   Status s;
+  size_t value_size = value.ToString().size();
+  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
+    s = WriteTraceSequence(taMerge, column_family_id, key.ToString(),
+                           value_size, c_time_);
+    if (!s.ok()) {
+      return Status::Corruption("Failed to write the trace sequence to file");
+    }
+  }
+
   if (!ta_[taMerge].enabled) {
     return Status::OK();
   }
-
-  size_t value_size = value.ToString().size();
   s = KeyStatsInsertion(taMerge, column_family_id, key.ToString(), value_size,
                         c_time_);
   if (!s.ok()) {
     return Status::Corruption("Failed to insert key statistics");
-  }
-
-  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
-    s = WriteTraceSequence(taMerge, column_family_id, key.ToString(),
-                           value_size, c_time_);
   }
   return s;
 }
@@ -712,9 +752,12 @@ void TraceAnalyzer::PrintGetStatistics() {
       continue;
     }
     ta_[type].total_keys = 0;
-    printf("################# Operation Type: %s #####################\n",
+    printf("\n################# Operation Type: %s #####################\n",
            ta_[type].type_name.c_str());
     for (auto i = ta_[type].stats.begin(); i != ta_[type].stats.end(); i++) {
+      if (i->second.a_count == 0) {
+        continue;
+      }
       uint64_t total_a_keys =
           static_cast<uint64_t>(i->second.a_key_stats.size());
       cfs_[i->second.cf_id].a_count += total_a_keys;
@@ -748,13 +791,13 @@ void TraceAnalyzer::PrintGetStatistics() {
       }
     }
     printf("*********************************************************\n");
-    printf("Total keys of %s is: %" PRIu64 "\n", ta_[type].type_name.c_str(),
+    printf("Total keys of '%s' is: %" PRIu64 "\n", ta_[type].type_name.c_str(),
            ta_[type].total_keys);
     total_access_keys_ += ta_[type].total_keys;
   }
 
   // Print the overall statistic information of the trace
-  printf("*********************************************************\n");
+  printf("\n*********************************************************\n");
   printf("*********************************************************\n");
   printf("The column family based statistics\n");
   for (auto it = cfs_.begin(); it != cfs_.end(); it++) {
@@ -766,7 +809,7 @@ void TraceAnalyzer::PrintGetStatistics() {
   }
 
   if (analyzer_opts_.print_overall_stats) {
-    printf("*********************************************************\n");
+    printf("\n*********************************************************\n");
     printf("*********************************************************\n");
     printf("Total_requests: %" PRIu64 " Total_accessed_keys: %" PRIu64
            " Total_gets: %" PRIu64 " Total_writes: %" PRIu64 "\n",
@@ -781,12 +824,16 @@ Status TraceAnalyzer::WriteTraceSequence(const uint32_t& type,
                                          const size_t value_size,
                                          const uint64_t ts) {
   std::string hex_key = rocksdb::LDBCommand::StringToHex(key);
+  int ret;
   if (analyzer_opts_.no_key) {
-    fprintf(trace_sequence_f, "%u %u %zu %" PRIu64 "\n", type, cf_id,
-            value_size, ts);
+    ret = fprintf(trace_sequence_f, "%u %u %zu %" PRIu64 "\n", type, cf_id,
+                  value_size, ts);
   } else {
-    fprintf(trace_sequence_f, "%u %u %zu %" PRIu64 " %s\n", type, cf_id,
-            value_size, ts, hex_key.c_str());
+    ret = fprintf(trace_sequence_f, "%u %u %zu %" PRIu64 " %s\n", type, cf_id,
+                  value_size, ts, hex_key.c_str());
+  }
+  if (ret < 0) {
+    return Status::IOError("failed to write the file");
   }
   return Status::OK();
 }
@@ -878,7 +925,6 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
       analyzer_opts.output_prefix_cut = true;
     } else if (strncmp(argv[i], "--output_trace_sequence", 23) == 0) {
       analyzer_opts.output_trace_sequence = true;
-      ;
     } else if (strncmp(argv[i], "--intput_key_space_dir=", 23) == 0) {
       analyzer_opts.key_space_dir = argv[i] + 23;
       analyzer_opts.input_key_space = true;
@@ -936,6 +982,7 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
 
   s = analyzer->MakeStatistics();
   if (!s.ok()) {
+    analyzer->EndProcessing();
     fprintf(stderr, "Cannot make the statistics\n");
     exit(1);
   }
@@ -943,12 +990,13 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
   s = analyzer->ReProcessing();
   if (!s.ok()) {
     fprintf(stderr, "Cannot re-process the trace for more statistics\n");
+    analyzer->EndProcessing();
     exit(1);
   }
 
   s = analyzer->EndProcessing();
   if (!s.ok()) {
-    fprintf(stderr, "Cannot ouput the result\n");
+    fprintf(stderr, "Cannot close the trace analyzer\n");
     exit(1);
   }
 
