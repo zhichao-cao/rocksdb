@@ -99,8 +99,8 @@ struct TraceStats {
   std::map<uint64_t, uint64_t> a_key_size_stats;
   std::map<uint64_t, uint64_t> a_value_size_stats;
   std::priority_queue<std::pair<uint64_t, std::string>,
-                      std::vector<std::pair<uint64_t, std::string>>,
-                      std::greater<std::pair<uint64_t, std::string>>> top_k_queue;
+                  std::vector<std::pair<uint64_t, std::string>>,
+                  std::greater<std::pair<uint64_t, std::string>>> top_k_queue;
   std::list<TraceUnit> time_serial;
 
   FILE* time_serial_f;

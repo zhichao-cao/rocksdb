@@ -16,6 +16,7 @@
 #include <sstream>
 #include <vector>
 #include <stdexcept>
+#include <sys/stat.h>
 
 #include "db/db_impl.h"
 #include "db/memtable.h"
@@ -42,7 +43,7 @@
 
 namespace rocksdb {
 
-
+// Transfer the Microsecond time to date time
 std::string TraceAnalyzer::MicrosdToDate(uint64_t time_in) {
   time_t tx = static_cast<time_t>(time_in / 1000000);
   int rest = static_cast<int>(time_in % 1000000);
@@ -52,7 +53,7 @@ std::string TraceAnalyzer::MicrosdToDate(uint64_t time_in) {
   return date_time;
 }
 
-
+// The default constructor of AnalyzerOptions
 AnalyzerOptions::AnalyzerOptions() {
   output_key_stats = false;
   output_access_count_stats = false;
@@ -156,7 +157,8 @@ TraceAnalyzer::TraceAnalyzer(std::string &trace_path, std::string &output_path,
 
 TraceAnalyzer::~TraceAnalyzer() {}
 
-// Prepare the global trace reader and writer here
+// Prepare the processing
+// Initiate the global trace reader and writer here
 Status TraceAnalyzer::PrepareProcessing() {
   Status s;
   // Prepare the trace reader
@@ -185,7 +187,8 @@ Status TraceAnalyzer::PrepareProcessing() {
 }
 
 // process the trace itself and redirect the trace content
-// to different operation type handler
+// to different operation type handler. With different race
+// format, this function can be changed
 Status TraceAnalyzer::StartProcessing() {
   Status s;
   Trace header;
@@ -237,6 +240,10 @@ Status TraceAnalyzer::StartProcessing() {
 }
 
 
+// After the trace is processed by StartProcessing, the statistic data
+// is stored in the map or other in memory data structures. To get the
+// other statistic result such as key size distribution, value size
+// distribution, are processed here.
 Status TraceAnalyzer::MakeStatistics() {
   int ret;
   for (int type = 0; type < taTypeNum; type++) {
@@ -314,6 +321,23 @@ Status TraceAnalyzer::MakeStatistics() {
           }
         }
       }
+
+      //output the value size distribution
+      if (analyzer_opts_.print_value_distribution &&
+          i->second.a_value_size_f != nullptr) {
+        uint64_t v_begin = 0, v_end = 0;
+        for (auto it = i->second.a_value_size_stats.begin();
+            it != i->second.a_value_size_stats.end(); it++) {
+          v_begin = v_end;
+          v_end = (it->first+1)*analyzer_opts_.value_interval;
+          ret = fprintf(i->second.a_value_size_f, "Number_of_value_size_between %" PRIu64
+              " and %" PRIu64 " is: %" PRIu64 "\n", v_begin, v_end, it->second);
+          if (ret < 0) {
+            return Status::IOError("write file failed");
+          }
+        }
+      }
+
     }
   }
 
@@ -468,6 +492,7 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
   unit.cf_id = cf_id;
   unit.value_size = value_size;
   unit.access_count = 1;
+  uint64_t dist_value_size = value_size/analyzer_opts_.value_interval;
   if (found_stats == ta_[type].stats.end()) {
     TraceStats new_stats;
     new_stats.cf_id = cf_id;
@@ -476,6 +501,7 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     new_stats.akey_id = 0;
     s = OpenStatsOutputFiles(ta_[type].type_name, new_stats);
     new_stats.a_key_stats[key] = unit;
+    new_stats.a_value_size_stats[dist_value_size] = 1;
     ta_[type].stats[cf_id] = new_stats;
   } else {
     found_stats->second.a_count++;
@@ -485,7 +511,16 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     } else {
       found_key->second.access_count++;
     }
+
+    auto found_value = found_stats->second.a_value_size_stats.find(
+                        dist_value_size);
+    if (found_value == found_stats->second.a_value_size_stats.end()) {
+      found_stats->second.a_value_size_stats[dist_value_size] = 1;
+    } else {
+      found_value->second++;
+    }
   }
+
   if (cfs_.find(cf_id) == cfs_.end()) {
     CfUnit cf_unit;
     cf_unit.cf_id = cf_id;
@@ -746,6 +781,12 @@ Status TraceAnalyzer::HandleMergeCF(uint32_t column_family_id, const Slice& key,
   return s;
 }
 
+// Before the analyzer is closed, the requested general statistic results are
+// printed out here. In current stage, these information are not output to
+// the files.
+// -----type
+//          |__cf_id
+//                |_statistics
 void TraceAnalyzer::PrintGetStatistics() {
   for (int type = 0; type < taTypeNum; type++) {
     if (!ta_[type].enabled) {
@@ -887,6 +928,10 @@ void print_help() {
       Print the top k keys that have been accessed most
     --output_ignore_count=
       ignores the access count <= this value to shorter the output
+    --value_interval=
+      To output the value distribution, we need to set the value intervals and
+      make the statistic of the value size distribution in different intervals
+      The default is 128B
  )");
 }
 
@@ -895,6 +940,7 @@ void print_help() {
 int TraceAnalyzerTool::Run(int argc, char** argv) {
   std::string trace_path;
   std::string output_path;
+  struct stat info;
 
   AnalyzerOptions analyzer_opts;
 
@@ -906,8 +952,16 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
   for (int i = 1; i < argc; i++) {
     if (strncmp(argv[i], "--trace_file=", 13) == 0) {
       trace_path = argv[i] + 13;
+      if ( stat(trace_path.c_str(), &info ) != 0 ) {
+        fprintf(stderr, "Unknown path: %s\n", trace_path.c_str());
+        exit(1);
+      }
     } else if (strncmp(argv[i], "--output_dir=", 13) == 0) {
       output_path = argv[i] + 13;
+      if ( stat(output_path.c_str(), &info ) != 0 ) {
+        fprintf(stderr, "Unknown path: %s\n", output_path.c_str());
+        exit(1);
+      }
     } else if (strncmp(argv[i], "--output_prefix=", 16) == 0) {
       analyzer_opts.output_prefix = argv[i] + 16;
     } else if (strncmp(argv[i], "--output_key_stats", 18) == 0) {
@@ -927,6 +981,11 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
       analyzer_opts.output_trace_sequence = true;
     } else if (strncmp(argv[i], "--intput_key_space_dir=", 23) == 0) {
       analyzer_opts.key_space_dir = argv[i] + 23;
+      if (stat(analyzer_opts.key_space_dir.c_str(), &info ) != 0 ) {
+        fprintf(stderr, "Unknown path: %s\n",
+                analyzer_opts.key_space_dir.c_str());
+        exit(1);
+      }
       analyzer_opts.input_key_space = true;
     } else if (strncmp(argv[i], "--use_get", 9) == 0) {
       analyzer_opts.use_get = true;
@@ -946,9 +1005,15 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
       analyzer_opts.print_overall_stats = true;
     } else if (strncmp(argv[i], "--print_key_distribution", 24) == 0) {
       analyzer_opts.print_key_distribution = true;
+   } else if (strncmp(argv[i], "--print_value_distribution", 26) == 0) {
+      analyzer_opts.print_value_distribution = true;
     } else if (strncmp(argv[i], "--print_top_k_access=", 21) == 0) {
       std::string tmp = argv[i] + 21;
       analyzer_opts.top_k = std::stoi(tmp);
+      if (analyzer_opts.top_k < 0 || analyzer_opts.top_k > 50) {
+        fprintf(stderr, "Unacceptable top_k value: %d\n", analyzer_opts.top_k);
+        exit(1);
+      }
       analyzer_opts.print_top_k_access = true;
     } else if (strncmp(argv[i], "--output_ignore_count=", 22) == 0) {
       std::string tmp = argv[i] + 22;
@@ -956,6 +1021,11 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
     } else if (strncmp(argv[i], "--value_interval=", 17) == 0) {
       std::string tmp = argv[i] + 17;
       analyzer_opts.value_interval = std::stoi(tmp);
+      if (analyzer_opts.value_interval < 0) {
+        fprintf(stderr, "Unacceptable value_interval: %d\n",
+            analyzer_opts.value_interval);
+        exit(1);
+      }
       analyzer_opts.print_value_distribution = true;
     } else {
       fprintf(stderr, "Unrecognized argument '%s'\n\n", argv[i]);
@@ -966,6 +1036,10 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
 
   TraceAnalyzer *analyzer =
       new TraceAnalyzer(trace_path, output_path, analyzer_opts);
+  if (analyzer == nullptr) {
+    fprintf(stderr, "Cannot initiate the trace analyzer\n");
+    exit(1);
+  }
 
   rocksdb::Status s = analyzer->PrepareProcessing();
   if (!s.ok()) {
