@@ -43,6 +43,12 @@
 
 namespace rocksdb {
 
+std::map<std::string, uint32_t> cfname_to_cfid = {{"default", 0},
+      {"__system__", 1}, {"cf_fbobj", 2}, {"cf_assoc_count", 3},
+      {"cf_fbobj_deleter", 4}, {"cf_assoc", 5}, {"rev:cf_assoc_id1_type", 6},
+      {"cf_assoc_deleter", 7}, {"rev:cf_assoc_deleter_id1_type", 8},
+      {"cf_fbobj_type_id", 9}};
+
 // Transfer the Microsecond time to date time
 std::string TraceAnalyzer::MicrosdToDate(uint64_t time_in) {
   time_t tx = static_cast<time_t>(time_in / 1000000);
@@ -224,7 +230,14 @@ Status TraceAnalyzer::StartProcessing() {
       }
     } else if (trace.type == kTraceGet) {
       total_gets_++;
-      s = HandleGetCF(0, trace.payload, trace.ts);
+
+      //tmp code here for a specific trace
+      uint32_t tmp_cf_id = 0;
+      if(cfname_to_cfid.find(trace.cf_name) != cfname_to_cfid.end()) {
+        tmp_cf_id = cfname_to_cfid[trace.cf_name];
+      }
+
+      s = HandleGetCF(tmp_cf_id, trace.payload, trace.ts);
       if (!s.ok()) {
         fprintf(stderr, "Cannot process the get in the trace\n");
         exit(1);
