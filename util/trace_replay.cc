@@ -29,7 +29,6 @@ Status TraceWriter::WriteHeader() {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceBegin;
-  trace.cf_name = kTraceMagic;
   trace.payload = header;
 
   return WriteRecord(trace);
@@ -48,6 +47,8 @@ Status TraceWriter::WriteRecord(Trace& trace) {
   if (!s.ok()) {
     return s;
   }
+
+  /*
   // Colume family name
   std::string cf_length;
   PutFixed32(&cf_length, static_cast<uint32_t>(trace.cf_name.size()));
@@ -56,6 +57,7 @@ Status TraceWriter::WriteRecord(Trace& trace) {
     return s;
   }
   s = file_writer_->Append(Slice(trace.cf_name));
+  */
 
   // Payload
   std::string payload_length;
@@ -139,6 +141,7 @@ Status TraceReader::ReadRecord(Trace& trace) {
   TraceType type = static_cast<TraceType>(buffer_[0]);
   trace.type = type;
 
+  /*
   // Read colume family name length
   s = file_reader_->Read(offset_, 4, &result_, buffer_);
   if (!s.ok()) {
@@ -168,6 +171,7 @@ Status TraceReader::ReadRecord(Trace& trace) {
     bytes_to_read -= to_read;
     to_read = bytes_to_read > kBufferSize ? kBufferSize : bytes_to_read;
   }
+  */
 
   // Read Payload length
   s = file_reader_->Read(offset_, 4, &result_, buffer_);
@@ -181,6 +185,8 @@ Status TraceReader::ReadRecord(Trace& trace) {
   uint32_t payload_len = DecodeFixed32(buffer_);
 
   // Read Payload
+  unsigned int bytes_to_read;
+  unsigned int to_read;
   bytes_to_read = payload_len;
   to_read = bytes_to_read > kBufferSize ? kBufferSize : bytes_to_read;
   while (to_read > 0) {
@@ -208,24 +214,22 @@ Tracer::Tracer(Env* env, std::unique_ptr<TraceWriter>&& trace_writer)
 
 Tracer::~Tracer() { trace_writer_.reset(); }
 
-Status Tracer::TraceWrite(WriteBatch* write_batch, const std::string& cf_name,
+Status Tracer::TraceWrite(WriteBatch* write_batch,
                           const uint32_t& cf_id) {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceWrite;
   trace.cf_id = cf_id;
-  trace.cf_name = cf_name;
   trace.payload = write_batch->Data();
   return trace_writer_->WriteRecord(trace);
 }
 
-Status Tracer::TraceGet(const Slice& key, const std::string& cf_name,
+Status Tracer::TraceGet(const Slice& key,
                         const uint32_t& cf_id) {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceGet;
   trace.cf_id = cf_id;
-  trace.cf_name = cf_name;
   trace.payload = key.ToString();
   return trace_writer_->WriteRecord(trace);
 }

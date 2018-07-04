@@ -248,6 +248,8 @@ Status TraceAnalyzer::StartProcessing() {
     if (!s.ok()) {
       break;
     }
+    std::string cf_name;
+    cf_name = std::to_string(trace.cf_id);
     TraceUnit unit;
     total_requests++;
     if (trace.type == kTraceWrite) {
@@ -260,10 +262,10 @@ Status TraceAnalyzer::StartProcessing() {
       unit.value_size = 0;
       unit.ts = trace.ts;
       unit.cf_id = trace.cf_id;
-      if (get_map_.find(trace.cf_name) == get_map_.end()) {
+      if (get_map_.find(cf_name) == get_map_.end()) {
         TraceStats get_stats;
         get_stats.cf_id = trace.cf_id;
-        get_stats.cf_name = trace.cf_name;
+        get_stats.cf_name = cf_name;
         get_stats.trace_unit_file = nullptr;
         get_stats.get_count = 1;
         get_stats.total_count = 1;
@@ -272,11 +274,11 @@ Status TraceAnalyzer::StartProcessing() {
           fprintf(stderr, "Cannot insert the trace unit to the map\n");
           return s;
         }
-        get_map_[trace.cf_name] = get_stats;
+        get_map_[cf_name] = get_stats;
       } else {
-        s = TraceStatsInsertionGet(unit, get_map_[trace.cf_name]);
-        get_map_[trace.cf_name].get_count++;
-        get_map_[trace.cf_name].total_count++;
+        s = TraceStatsInsertionGet(unit, get_map_[cf_name]);
+        get_map_[cf_name].get_count++;
+        get_map_[cf_name].total_count++;
         if (!s.ok()) {
           fprintf(stderr, "Cannot insert the trace unit to the map\n");
           return s;
@@ -284,14 +286,14 @@ Status TraceAnalyzer::StartProcessing() {
       }
 
       if (analyzer_opts_.output_trace_unit) {
-        if (get_map_[trace.cf_name].trace_unit_file == nullptr) {
+        if (get_map_[cf_name].trace_unit_file == nullptr) {
           std::string trace_file_name =
               output_path_ + "/" + analyzer_opts_.output_prefix + "-" +
-              get_map_[trace.cf_name].cf_name + "-trace_unit.txt";
-          get_map_[trace.cf_name].trace_unit_file =
+              get_map_[cf_name].cf_name + "-trace_unit.txt";
+          get_map_[cf_name].trace_unit_file =
               fopen(trace_file_name.c_str(), "w");
         }
-        s = TraceUnitWriter(get_map_[trace.cf_name].trace_unit_file, unit);
+        s = TraceUnitWriter(get_map_[cf_name].trace_unit_file, unit);
         if (!s.ok()) {
           fprintf(stderr, "Cannot write the trace unit to the file\n");
           return s;
