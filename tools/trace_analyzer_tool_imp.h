@@ -47,11 +47,19 @@ struct TraceUnit {
   uint32_t cf_id;
 };
 
+struct TypeCorre {
+  uint64_t count;
+  uint64_t total_ts;
+};
+
 struct StatsUnit {
   uint64_t key_id;
   uint32_t cf_id;
   size_t value_size;
   uint64_t access_count;
+  uint64_t latest_ts;
+  uint32_t latest_type;
+  std::vector<TypeCorre> v_corre;
 };
 
 
@@ -64,6 +72,7 @@ class AnalyzerOptions {
   bool output_prefix_cut;
   bool output_trace_sequence;
   bool output_io_stats;
+  bool output_correlation;
   bool input_key_space;
   bool use_get;
   bool use_put;
@@ -83,10 +92,14 @@ class AnalyzerOptions {
   int prefix_cut;
   std::string output_prefix;
   std::string key_space_dir;
+  std::vector<std::vector<int>> corre_map;
+  std::vector<std::pair<int, int>> corre_list;
 
   AnalyzerOptions();
 
   ~AnalyzerOptions();
+
+  void SparseCorreInput(const std::string& in_str);
 };
 
 
@@ -112,6 +125,7 @@ struct TraceStats {
                   std::vector<std::pair<uint64_t, std::string>>,
                   std::greater<std::pair<uint64_t, std::string>>> top_k_queue;
   std::list<TraceUnit> time_serial;
+  std::vector<std::pair<uint64_t, uint64_t>> corre_output;
 
   FILE* time_serial_f;
   FILE* a_key_f;
@@ -198,6 +212,8 @@ class TraceAnalyzer {
   Status KeyStatsInsertion(const uint32_t& type, const uint32_t& cf_id,
                            const std::string& key, const size_t value_size,
                            const uint64_t ts);
+  Status StatsUnitCorreUpdate(StatsUnit& unit,
+                           const uint32_t& type, const uint64_t& ts);
   Status OpenStatsOutputFiles(const std::string& type, TraceStats& new_stats);
   FILE* CreateOutputFile(const std::string& type, const std::string& cf_name,
                          const std::string& ending);
@@ -210,6 +226,7 @@ class TraceAnalyzer {
   Status WriteTraceSequence(const uint32_t& type, const uint32_t& cf_id,
                             const std::string& key, const size_t value_size,
                             const uint64_t ts);
+  Status MakeStatisticCorrelation(TraceStats& stats, StatsUnit& unit);
   Status MakeStatisticIO();
 };
 

@@ -50,6 +50,12 @@ std::map<std::string, uint32_t> cfname_to_cfid = {{"default", 0},
       {"cf_assoc_deleter", 7}, {"rev:cf_assoc_deleter_id1_type", 8},
       {"cf_fbobj_type_id", 9}};
 
+std::map<std::string, int> taOptToIndex = {{"get", 0}, {"put", 1},
+      {"delete", 2}, {"single_delete", 3}, {"range_delete", 4}, {"merge", 5}};
+
+std::map<int, std::string> taIndexToOpt = {{0, "get"}, {1, "put"},
+      {2, "delete"}, {3, "single_delete"}, {4, "range_delete"}, {5, "merge"}};
+
 // Transfer the Microsecond time to date time
 std::string TraceAnalyzer::MicrosdToDate(uint64_t time_in) {
   time_t tx = static_cast<time_t>(time_in / 1000000);
@@ -61,13 +67,15 @@ std::string TraceAnalyzer::MicrosdToDate(uint64_t time_in) {
 }
 
 // The default constructor of AnalyzerOptions
-AnalyzerOptions::AnalyzerOptions() {
+AnalyzerOptions::AnalyzerOptions()
+    :corre_map(taTypeNum,std::vector<int>(taTypeNum, -1)) {
   output_key_stats = false;
   output_access_count_stats = false;
   output_time_serial = false;
   output_prefix_cut = false;
   output_trace_sequence = false;
   output_io_stats = false;
+  output_correlation = false;
   input_key_space = false;
   use_get = false;
   use_put = false;
@@ -82,7 +90,7 @@ AnalyzerOptions::AnalyzerOptions() {
   print_top_k_access = true;
   output_ignore_count = 0;
   start_time = 0;
-  value_interval = 128;
+  value_interval = 8;
   top_k = 1;
   prefix_cut = 0;
   output_prefix = "/trace_output";
@@ -90,6 +98,52 @@ AnalyzerOptions::AnalyzerOptions() {
 }
 
 AnalyzerOptions::~AnalyzerOptions() {}
+
+void AnalyzerOptions::SparseCorreInput(const std::string& in_str) {
+  std::string cur = in_str;
+  if (cur.size() == 0) {
+    output_correlation = false;
+    return;
+  }
+  while(!cur.empty()) {
+    if(cur.compare(0, 1, "[") != 0) {
+      fprintf(stderr, "Invalid correlation input: %s\n", in_str.c_str());
+      exit(1);
+    }
+    std::string opt1, opt2;
+    std::size_t split = cur.find_first_of(",");
+    if (split != std::string::npos) {
+      opt1 = cur.substr(1, split-1);
+    } else {
+      fprintf(stderr, "Invalid correlation input: %s\n", in_str.c_str());
+      exit(1);
+    }
+    std::size_t end = cur.find_first_of("]");
+    if (end != std::string::npos) {
+      opt2 = cur.substr(split+1, end-split-1);
+    } else {
+      fprintf(stderr, "Invalid correlation input: %s\n", in_str.c_str());
+      exit(1);
+    }
+    cur = cur.substr(end+1);
+
+    if(taOptToIndex.find(opt1) != taOptToIndex.end() &&
+          taOptToIndex.find(opt2) != taOptToIndex.end()) {
+      corre_list.push_back(std::make_pair(taOptToIndex[opt1],
+            taOptToIndex[opt2]));
+    } else {
+      fprintf(stderr, "Invalid correlation input: %s\n", in_str.c_str());
+      exit(1);
+    }
+  }
+
+  int sequence = 0;
+  for(auto it = corre_list.begin(); it != corre_list.end(); it++) {
+    corre_map[it->first][it->second] = sequence;
+    sequence++;
+  }
+  return;
+}
 
 // The trace statistic struct constructor
 TraceStats::TraceStats() {
@@ -316,6 +370,10 @@ Status TraceAnalyzer::MakeStatistics() {
             i->second.a_key_size_stats[it->first.size()]++;
           }
         }
+
+        if (analyzer_opts_.output_correlation) {
+          s = MakeStatisticCorrelation(i->second, it->second);
+        }
       }
 
       // Output the prefix cut or the whole content of the accessed key space
@@ -408,6 +466,23 @@ Status TraceAnalyzer::MakeStatistics() {
 }
 
 
+// Process the statistics of different operation type
+// correlations
+Status TraceAnalyzer::MakeStatisticCorrelation(TraceStats& stats,
+                                              StatsUnit& unit) {
+  if (stats.corre_output.size() != analyzer_opts_.corre_list.size()) {
+    fprintf(stderr, "Cannot make the statistic of correlation\n");
+    return Status::OK();
+  }
+
+  for (int i = 0; i < static_cast<int>(analyzer_opts_.corre_list.size()); i++) {
+    stats.corre_output[i].first += unit.v_corre[i].count;
+    stats.corre_output[i].second += unit.v_corre[i].total_ts;
+  }
+  return Status::OK();
+}
+
+
 // Process the statistics of IO
 Status TraceAnalyzer::MakeStatisticIO() {
   uint32_t duration = (end_time_ - begin_time_)/1000000;
@@ -428,7 +503,6 @@ Status TraceAnalyzer::MakeStatisticIO() {
       for (auto time_it = i->second.a_io_stats.begin();
             time_it != i->second.a_io_stats.end(); time_it++) {
         if(time_it->first>=duration) {
-          std::cout<<time_it->first;
           continue;
         }
         type_io[time_it->first][taTypeNum] += time_it->second;
@@ -635,7 +709,11 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
   unit.cf_id = cf_id;
   unit.value_size = value_size;
   unit.access_count = 1;
-  if(begin_time_ == 0) {
+  unit.latest_ts = ts;
+  unit.latest_type = type;
+  unit.v_corre.resize(analyzer_opts_.corre_list.size());
+
+ if(begin_time_ == 0) {
     begin_time_ = ts;
   }
   uint32_t time_in_sec;
@@ -659,6 +737,7 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     new_stats.a_key_stats[key] = unit;
     new_stats.a_value_size_stats[dist_value_size] = 1;
     new_stats.a_io_stats[time_in_sec] = 1;
+    new_stats.corre_output.resize(analyzer_opts_.corre_list.size());
     ta_[type].stats[cf_id] = new_stats;
   } else {
     found_stats->second.a_count++;
@@ -671,6 +750,9 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
       found_stats->second.a_key_stats[key] = unit;
     } else {
       found_key->second.access_count++;
+      if(analyzer_opts_.output_correlation) {
+        s = StatsUnitCorreUpdate(found_key->second, type, ts);
+      }
     }
 
     auto found_value = found_stats->second.a_value_size_stats.find(
@@ -687,6 +769,7 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     } else {
       found_io->second++;
     }
+
   }
 
   if (cfs_.find(cf_id) == cfs_.end()) {
@@ -707,6 +790,25 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     ta_[type].stats[cf_id].time_serial.push_back(trace_u);
   }
 
+  return Status::OK();
+}
+
+Status TraceAnalyzer::StatsUnitCorreUpdate(StatsUnit& unit,
+                  const uint32_t& type, const uint64_t& ts) {
+  if (type >= taTypeNum) {
+    fprintf(stderr, "Unknown Type Id: %u\n", type);
+    exit(1);
+  }
+  int corre_idx = analyzer_opts_.corre_map[unit.latest_type][type];
+  if (corre_idx < 0 || corre_idx >=
+      static_cast<int>(unit.v_corre.size())) {
+    return Status::OK();
+  }
+
+  unit.v_corre[corre_idx].count++;
+  unit.v_corre[corre_idx].total_ts += (ts - unit.latest_ts);
+  unit.latest_ts = ts;
+  unit.latest_type = type;
   return Status::OK();
 }
 
@@ -1024,6 +1126,21 @@ void TraceAnalyzer::PrintGetStatistics() {
                  it->second);
         }
       }
+
+      // print the operation correlations
+      if (analyzer_opts_.output_correlation) {
+        for(int corre = 0; corre <
+            static_cast<int>(analyzer_opts_.corre_list.size()); corre++) {
+          printf("The correlation statistics of '%s' after '%s' is:",
+                taIndexToOpt[analyzer_opts_.corre_list[corre].second].c_str(),
+                taIndexToOpt[analyzer_opts_.corre_list[corre].first].c_str());
+          double corre_ave = (static_cast<double>
+                  (i->second.corre_output[corre].second))/
+                  (i->second.corre_output[corre].first*1000);
+          printf(" total numbers: %" PRIu64 " average time: %f(ms)\n",
+                  i->second.corre_output[corre].first, corre_ave);
+        }
+      }
     }
     printf("*********************************************************\n");
     printf("Total keys of '%s' is: %" PRIu64 "\n", ta_[type].type_name.c_str(),
@@ -1101,6 +1218,11 @@ void print_help() {
     --output_io_stats
       Output the statistics of the IO per second, the IO including all
       operations
+    --output_correlation=<[correlation pairs][.,.]>
+      Output the operation correlations between the pairs of operations
+      listed in the parameter, input should select the operations from:
+      get, put, delete, single_delete, rangle_delete, merge. No space
+      between the pairs separated by commar. Example: =[get,get][put,get]
     --intput_key_space_dir=<the directory stores full key space files>
       The key space file should be named as <column family name>.txt
     --use_get
@@ -1180,6 +1302,10 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
       analyzer_opts.output_trace_sequence = true;
     } else if (strncmp(argv[i], "--output_io_stats", 17) == 0) {
       analyzer_opts.output_io_stats = true;
+    } else if (strncmp(argv[i], "--output_correlation=", 21) == 0) {
+      std::string tmp = argv[i] + 21;
+      analyzer_opts.SparseCorreInput(tmp);
+      analyzer_opts.output_correlation = true;
     } else if (strncmp(argv[i], "--intput_key_space_dir=", 23) == 0) {
       analyzer_opts.key_space_dir = argv[i] + 23;
       if (stat(analyzer_opts.key_space_dir.c_str(), &info ) != 0 ) {
