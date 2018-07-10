@@ -26,6 +26,7 @@ enum TraceType : char {
   kTraceEnd = 2,
   kTraceWrite = 3,
   kTraceGet = 4,
+  kTraceIter = 5,
   kTraceMax,
 };
 
@@ -50,6 +51,8 @@ class Tracer {
   Status TraceWrite(WriteBatch* write_batch,
                     const uint32_t& cf_id);
   Status TraceGet(const Slice& key,
+                  const uint32_t& cf_id);
+  Status TraceIter(const Slice& key,
                   const uint32_t& cf_id);
 
   Status Close();

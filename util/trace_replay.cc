@@ -234,6 +234,16 @@ Status Tracer::TraceGet(const Slice& key,
   return trace_writer_->WriteRecord(trace);
 }
 
+Status Tracer::TraceIter(const Slice& key,
+                        const uint32_t& cf_id) {
+  Trace trace;
+  trace.ts = env_->NowMicros();
+  trace.type = kTraceIter;
+  trace.cf_id = cf_id;
+  trace.payload = key.ToString();
+  return trace_writer_->WriteRecord(trace);
+}
+
 Status Tracer::Close() {
   Status s = trace_writer_->WriteFooter();
   trace_writer_.reset();

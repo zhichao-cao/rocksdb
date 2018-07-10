@@ -657,6 +657,11 @@ class DBImpl : public DB {
   static Status CreateAndNewDirectory(Env* env, const std::string& dirname,
                                       std::unique_ptr<Directory>* directory);
 
+  //trace collecting and replay
+  std::unique_ptr<Tracer> tracer_;
+  mutable InstrumentedMutex trace_mutex_;
+  std::unique_ptr<Replayer> replayer_;
+
  protected:
   Env* const env_;
   const std::string dbname_;
@@ -665,13 +670,10 @@ class DBImpl : public DB {
   bool own_info_log_;
   const DBOptions initial_db_options_;
   const ImmutableDBOptions immutable_db_options_;
-  mutable InstrumentedMutex trace_mutex_;
   MutableDBOptions mutable_db_options_;
   Statistics* stats_;
   std::unordered_map<std::string, RecoveredTransaction*>
       recovered_transactions_;
-  std::unique_ptr<Tracer> tracer_;
-  std::unique_ptr<Replayer> replayer_;
   // Except in DB::Open(), WriteOptionsFile can only be called when:
   // Persist options to options file.
   // If need_mutex_lock = false, the method will lock DB mutex.
