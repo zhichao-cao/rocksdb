@@ -26,6 +26,7 @@ enum TraceType : char {
   kTraceEnd = 2,
   kTraceWrite = 3,
   kTraceGet = 4,
+  kTraceIter = 5,
   kTraceMax,
 };
 

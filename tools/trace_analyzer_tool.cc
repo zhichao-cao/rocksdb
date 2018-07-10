@@ -51,10 +51,12 @@ std::map<std::string, uint32_t> cfname_to_cfid = {{"default", 0},
       {"cf_fbobj_type_id", 9}};
 
 std::map<std::string, int> taOptToIndex = {{"get", 0}, {"put", 1},
-      {"delete", 2}, {"single_delete", 3}, {"range_delete", 4}, {"merge", 5}};
+      {"delete", 2}, {"single_delete", 3}, {"range_delete", 4}, {"merge", 5},
+      {"iterator", 6}};
 
 std::map<int, std::string> taIndexToOpt = {{0, "get"}, {1, "put"},
-      {2, "delete"}, {3, "single_delete"}, {4, "range_delete"}, {5, "merge"}};
+      {2, "delete"}, {3, "single_delete"}, {4, "range_delete"}, {5, "merge"},
+      {6, "iterator"}};
 
 // Transfer the Microsecond time to date time
 std::string TraceAnalyzer::MicrosdToDate(uint64_t time_in) {
@@ -83,6 +85,7 @@ AnalyzerOptions::AnalyzerOptions()
   use_single_delete = false;
   use_range_delete = false;
   use_merge = false;
+  use_iterator = false;
   no_key = false;
   print_overall_stats = false;
   print_key_distribution = false;
@@ -226,6 +229,12 @@ TraceAnalyzer::TraceAnalyzer(std::string &trace_path, std::string &output_path,
   } else {
     ta_[5].enabled = false;
   }
+  ta_[6].type_name = "iterator";
+  if (_analyzer_opts.use_iterator) {
+      ta_[6].enabled = true;
+  } else {
+      ta_[6].enabled = false;
+  }
 }
 
 TraceAnalyzer::~TraceAnalyzer() {}
@@ -319,6 +328,13 @@ Status TraceAnalyzer::StartProcessing() {
       s = HandleGetCF(tmp_cf_id, trace.payload, trace.ts);
       if (!s.ok()) {
         fprintf(stderr, "Cannot process the get in the trace\n");
+        exit(1);
+      }
+    } else if (trace.type == kTraceIter) {
+      uint32_t tmp_cf_id = 0;
+      s = HandleIterCF(tmp_cf_id, trace.payload, trace.ts);
+      if (!s.ok()) {
+        fprintf(stderr, "Cannot process the iterator in the trace\n");
         exit(1);
       }
     }
@@ -1057,6 +1073,28 @@ Status TraceAnalyzer::HandleMergeCF(uint32_t column_family_id, const Slice& key,
   return s;
 }
 
+// Handle the Iterator request in the trace
+Status TraceAnalyzer::HandleIterCF(uint32_t column_family_id,
+                                  const std::string& key, const uint64_t& ts) {
+  Status s;
+  size_t value_size = 0;
+  if (analyzer_opts_.output_trace_sequence && trace_sequence_f != nullptr) {
+    s = WriteTraceSequence(taIter, column_family_id, key, value_size, ts);
+    if (!s.ok()) {
+      return Status::Corruption("Failed to write the trace sequence to file");
+    }
+  }
+
+  if (!ta_[taIter].enabled) {
+    return Status::OK();
+  }
+  s = KeyStatsInsertion(taIter, column_family_id, key, value_size, ts);
+  if (!s.ok()) {
+    return Status::Corruption("Failed to insert key statistics");
+  }
+  return s;
+}
+
 // Before the analyzer is closed, the requested general statistic results are
 // printed out here. In current stage, these information are not output to
 // the files.
@@ -1237,6 +1275,8 @@ void print_help() {
       Analyze the DeleteRange operations
     --use_merge
       Analyze the MERGE operations
+    --use_iterator
+      Analyze the iterate operation like seek() and seekForPre()
     --no_key
       Does not output the key to the result files to make them smaller
     --print_overall_stats
@@ -1326,6 +1366,8 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
       analyzer_opts.use_range_delete = true;
     } else if (strncmp(argv[i], "--use_merge", 11) == 0) {
       analyzer_opts.use_merge = true;
+    } else if (strncmp(argv[i], "--use_iterator", 14) == 0) {
+      analyzer_opts.use_iterator = true;
     } else if (strncmp(argv[i], "--no_key", 8) == 0) {
       analyzer_opts.no_key = true;
     } else if (strncmp(argv[i], "--print_overall_stats", 21) == 0) {

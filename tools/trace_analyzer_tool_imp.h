@@ -28,7 +28,7 @@ class WriteBatch;
 class AnalyzerOptions;
 class TraceWriteHandler;
 
-const int taTypeNum = 6;
+const int taTypeNum = 7;
 
 enum TraceOperationType : uint32_t {
   taGet = 0,
@@ -36,7 +36,8 @@ enum TraceOperationType : uint32_t {
   taDelete = 2,
   taSingleDelete = 3,
   taRangeDelete = 4,
-  taMerge = 5
+  taMerge = 5,
+  taIter = 6
 };
 
 struct TraceUnit {
@@ -80,6 +81,7 @@ class AnalyzerOptions {
   bool use_single_delete;
   bool use_range_delete;
   bool use_merge;
+  bool use_iterator;
   bool no_key;
   bool print_overall_stats;
   bool print_key_distribution;
@@ -185,6 +187,8 @@ class TraceAnalyzer {
                              const Slice& end_key);
   Status HandleMergeCF(uint32_t column_family_id, const Slice& key,
                        const Slice& value);
+  Status HandleIterCF(uint32_t column_family_id, const std::string& key,
+                      const uint64_t& ts);
 
  private:
   rocksdb::Env* env_;
@@ -266,7 +270,7 @@ class TraceWriteHandler : public WriteBatch::Handler {
   virtual void LogData(const Slice& blob) override {
     tmp_use = blob.ToString();
   }
-  virtual Status MarkBeginPrepare() override { return Status::OK(); }
+  //virtual Status MarkBeginPrepare() override { return Status::OK(); }
   virtual Status MarkEndPrepare(const Slice& xid) override {
     tmp_use = xid.ToString();
     return Status::OK();
