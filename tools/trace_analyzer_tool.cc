@@ -318,21 +318,13 @@ Status TraceAnalyzer::StartProcessing() {
       }
     } else if (trace.type == kTraceGet) {
       total_gets_++;
-
-      //tmp code here for a specific trace
-      uint32_t tmp_cf_id = 0;
-      if(cfname_to_cfid.find(trace.cf_name) != cfname_to_cfid.end()) {
-        tmp_cf_id = cfname_to_cfid[trace.cf_name];
-      }
-
-      s = HandleGetCF(tmp_cf_id, trace.payload, trace.ts);
+      s = HandleGetCF(trace.cf_id, trace.payload, trace.ts);
       if (!s.ok()) {
         fprintf(stderr, "Cannot process the get in the trace\n");
         exit(1);
       }
     } else if (trace.type == kTraceIter) {
-      uint32_t tmp_cf_id = 0;
-      s = HandleIterCF(tmp_cf_id, trace.payload, trace.ts);
+      s = HandleIterCF(trace.cf_id, trace.payload, trace.ts);
       if (!s.ok()) {
         fprintf(stderr, "Cannot process the iterator in the trace\n");
         exit(1);
@@ -395,6 +387,7 @@ Status TraceAnalyzer::MakeStatistics() {
       // Output the prefix cut or the whole content of the accessed key space
       if (analyzer_opts_.output_key_stats || analyzer_opts_.output_prefix_cut) {
         std::string prefix;
+        uint64_t prefix_access = 0;
         for (auto it = i->second.a_key_stats.begin();
              it != i->second.a_key_stats.end(); it++) {
           if (i->second.a_key_f == nullptr) {
@@ -412,12 +405,14 @@ Status TraceAnalyzer::MakeStatistics() {
             if (it->first.compare(0, analyzer_opts_.prefix_cut, prefix) != 0) {
               prefix = it->first.substr(0, analyzer_opts_.prefix_cut);
               std::string prefix_out = rocksdb::LDBCommand::StringToHex(prefix);
-              ret = fprintf(i->second.a_prefix_cut_f, "%" PRIu64 " %s\n",
-                            it->second.key_id, prefix_out.c_str());
+              ret = fprintf(i->second.a_prefix_cut_f, "%" PRIu64 " %" PRIu64 " %s\n",
+                            it->second.key_id, prefix_access, prefix_out.c_str());
+              prefix_access = 0;
               if (ret < 0) {
                 return Status::IOError("write file failed");
               }
             }
+            prefix_access += it->second.access_count;
           }
         }
       }

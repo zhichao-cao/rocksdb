@@ -1079,7 +1079,7 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
     StartTrace(trace_opts, trace_filename);
   }
   if (tracer_) {
-    tracer_->TraceGet(key, cfd->GetName(), cfd->GetID());
+    tracer_->TraceGet(key, cfd->GetID());
   }
   trace_mutex_.Unlock();
 
