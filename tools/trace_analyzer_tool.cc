@@ -1408,6 +1408,7 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
   rocksdb::Status s = analyzer->PrepareProcessing();
   if (!s.ok()) {
     fprintf(stderr, "Cannot initiate the trace reader\n");
+    delete analyzer;
     exit(1);
   }
 
@@ -1415,6 +1416,7 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
   if (!s.ok()) {
     analyzer->EndProcessing();
     fprintf(stderr, "Cannot processing the trace\n");
+    delete analyzer;
     exit(1);
   }
 
@@ -1422,6 +1424,7 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
   if (!s.ok()) {
     analyzer->EndProcessing();
     fprintf(stderr, "Cannot make the statistics\n");
+    delete analyzer;
     exit(1);
   }
 
@@ -1429,15 +1432,18 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
   if (!s.ok()) {
     fprintf(stderr, "Cannot re-process the trace for more statistics\n");
     analyzer->EndProcessing();
+    delete analyzer;
     exit(1);
   }
 
   s = analyzer->EndProcessing();
   if (!s.ok()) {
     fprintf(stderr, "Cannot close the trace analyzer\n");
+    delete analyzer;
     exit(1);
   }
 
+  delete analyzer;
   return 0;
 }
 }  // namespace rocksdb
