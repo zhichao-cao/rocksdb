@@ -168,6 +168,7 @@ TraceStats::TraceStats() {
   a_prefix_cut_f = nullptr;
   a_value_size_f = nullptr;
   a_io_f = nullptr;
+  a_top_io_prefix_f = nullptr;
   w_key_f = nullptr;
   w_prefix_cut_f = nullptr;
 }
@@ -386,37 +387,13 @@ Status TraceAnalyzer::MakeStatistics() {
 
       // Output the prefix cut or the whole content of the accessed key space
       if (analyzer_opts_.output_key_stats || analyzer_opts_.output_prefix_cut) {
-        std::string prefix;
-        uint64_t prefix_access = 0;
-        for (auto it = i->second.a_key_stats.begin();
-             it != i->second.a_key_stats.end(); it++) {
-          if (i->second.a_key_f == nullptr) {
-            fprintf(stderr, "The accessed_key_stats file is not opend\n");
-            exit(1);
-          }
-          ret = fprintf(i->second.a_key_f, "%u %zu %" PRIu64 " %" PRIu64 "\n",
-                        it->second.cf_id, it->second.value_size,
-                        it->second.key_id, it->second.access_count);
-          if (ret < 0) {
-            return Status::IOError("write file failed");
-          }
-          if (analyzer_opts_.output_prefix_cut &&
-              i->second.a_prefix_cut_f != nullptr) {
-            if (it->first.compare(0, analyzer_opts_.prefix_cut, prefix) != 0) {
-              prefix = it->first.substr(0, analyzer_opts_.prefix_cut);
-              std::string prefix_out = rocksdb::LDBCommand::StringToHex(prefix);
-              ret = fprintf(i->second.a_prefix_cut_f, "%" PRIu64 " %" PRIu64 " %s\n",
-                            it->second.key_id, prefix_access, prefix_out.c_str());
-              prefix_access = 0;
-              if (ret < 0) {
-                return Status::IOError("write file failed");
-              }
-            }
-            prefix_access += it->second.access_count;
-          }
+        s = MakeStatisticKeyStatsOrPrefix(i->second);
+        if (!s.ok()) {
+          return s;
         }
       }
 
+      // output the access count distribution
       if (analyzer_opts_.output_access_count_stats &&
           i->second.a_count_dist_f != nullptr) {
         for (auto it = i->second.a_count_stats.begin();
@@ -476,6 +453,78 @@ Status TraceAnalyzer::MakeStatistics() {
   return Status::OK();
 }
 
+// Process the statistics of the key access and
+// prefix of the accessed keys if required
+Status TraceAnalyzer::MakeStatisticKeyStatsOrPrefix(TraceStats& stats) {
+  int ret;
+  std::string prefix = "0";
+  uint64_t prefix_access = 0;
+  uint64_t prefix_count = 0;
+  double prefix_ave_access = 0.0;
+  for (auto it = stats.a_key_stats.begin(); it != stats.a_key_stats.end();
+       it++) {
+    if (stats.a_key_f == nullptr) {
+      fprintf(stderr, "The accessed_key_stats file is not opend\n");
+      exit(1);
+    }
+    ret = fprintf(stats.a_key_f, "%u %zu %" PRIu64 " %" PRIu64 "\n",
+                  it->second.cf_id, it->second.value_size, it->second.key_id,
+                  it->second.access_count);
+    if (ret < 0) {
+      return Status::IOError("write file failed");
+    }
+    if (analyzer_opts_.output_prefix_cut && stats.a_prefix_cut_f != nullptr) {
+      if (it->first.compare(0, analyzer_opts_.prefix_cut, prefix) != 0) {
+        std::string prefix_out = rocksdb::LDBCommand::StringToHex(prefix);
+        if (prefix_count == 0) {
+          prefix_ave_access = 0.0;
+        } else {
+          prefix_ave_access =
+              (static_cast<double>(prefix_access)) / prefix_count;
+        }
+        ret = fprintf(stats.a_prefix_cut_f,
+                      "%" PRIu64 " %" PRIu64 " %" PRIu64 " %f %s\n",
+                      it->second.key_id, prefix_access, prefix_count,
+                      prefix_ave_access, prefix_out.c_str());
+
+        // make the top k statistic for the prefix
+        if (static_cast<int>(stats.top_k_prefix_access.size()) <
+            analyzer_opts_.top_k) {
+          stats.top_k_prefix_access.push(
+              std::make_pair(prefix_access, prefix_out));
+        } else {
+          if (prefix_access > stats.top_k_prefix_access.top().first) {
+            stats.top_k_prefix_access.pop();
+            stats.top_k_prefix_access.push(
+                std::make_pair(prefix_access, prefix_out));
+          }
+        }
+
+        if (static_cast<int>(stats.top_k_prefix_ave.size()) <
+            analyzer_opts_.top_k) {
+          stats.top_k_prefix_ave.push(
+              std::make_pair(prefix_ave_access, prefix_out));
+        } else {
+          if (prefix_ave_access > stats.top_k_prefix_ave.top().first) {
+            stats.top_k_prefix_ave.pop();
+            stats.top_k_prefix_ave.push(
+                std::make_pair(prefix_ave_access, prefix_out));
+          }
+        }
+
+        prefix = it->first.substr(0, analyzer_opts_.prefix_cut);
+        prefix_access = 0;
+        prefix_count = 0;
+        if (ret < 0) {
+          return Status::IOError("write file failed");
+        }
+      }
+      prefix_access += it->second.access_count;
+      prefix_count += 1;
+    }
+  }
+  return Status::OK();
+}
 
 // Process the statistics of different operation type
 // correlations
@@ -538,8 +587,48 @@ Status TraceAnalyzer::MakeStatisticIO() {
             time_line ++;
           }
         }
+
+        // Process the top k IO peaks
+        if (analyzer_opts_.output_prefix_cut) {
+          if (static_cast<int>(i->second.top_k_io_sec.size()) <
+              analyzer_opts_.top_k) {
+            i->second.top_k_io_sec.push(
+                std::make_pair(time_it->second, time_it->first));
+          } else {
+            if (i->second.top_k_io_sec.size() > 0 &&
+                i->second.top_k_io_sec.top().first < time_it->second) {
+              i->second.top_k_io_sec.pop();
+              i->second.top_k_io_sec.push(
+                  std::make_pair(time_it->second, time_it->first));
+            }
+          }
+        }
       }
       i->second.a_ave_io = (static_cast<double>(cf_io_sum))/duration;
+
+      // output the prefix of top k access peak
+      if (analyzer_opts_.output_prefix_cut &&
+          i->second.a_top_io_prefix_f != nullptr) {
+        while (!i->second.top_k_io_sec.empty()) {
+          fprintf(i->second.a_top_io_prefix_f, "At time: %u with IO num: %u\n",
+                  i->second.top_k_io_sec.top().second,
+                  i->second.top_k_io_sec.top().first);
+          uint32_t io_time = i->second.top_k_io_sec.top().second;
+          i->second.top_k_io_sec.pop();
+          if (i->second.a_io_prefix_stats.find(io_time) !=
+              i->second.a_io_prefix_stats.end()) {
+            for (auto io_prefix = i->second.a_io_prefix_stats[io_time].begin();
+                 io_prefix != i->second.a_io_prefix_stats[io_time].end();
+                 io_prefix++) {
+              std::string io_prefix_out =
+                  rocksdb::LDBCommand::StringToHex(io_prefix->first);
+              fprintf(i->second.a_top_io_prefix_f,
+                      "The prefix: %s Access count: %u\n",
+                      io_prefix_out.c_str(), io_prefix->second);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -723,8 +812,12 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
   unit.latest_ts = ts;
   unit.latest_type = type;
   unit.v_corre.resize(analyzer_opts_.corre_list.size());
+  std::string prefix;
+  if (analyzer_opts_.output_prefix_cut) {
+    prefix = key.substr(0, analyzer_opts_.prefix_cut);
+  }
 
- if(begin_time_ == 0) {
+  if (begin_time_ == 0) {
     begin_time_ = ts;
   }
   uint32_t time_in_sec;
@@ -749,6 +842,11 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     new_stats.a_value_size_stats[dist_value_size] = 1;
     new_stats.a_io_stats[time_in_sec] = 1;
     new_stats.corre_output.resize(analyzer_opts_.corre_list.size());
+    if (analyzer_opts_.output_prefix_cut) {
+      std::map<std::string, uint32_t> tmp_io_map;
+      tmp_io_map[prefix] = 1;
+      new_stats.a_io_prefix_stats[time_in_sec] = tmp_io_map;
+    }
     ta_[type].stats[cf_id] = new_stats;
   } else {
     found_stats->second.a_count++;
@@ -781,6 +879,20 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
       found_io->second++;
     }
 
+    if (analyzer_opts_.output_prefix_cut) {
+      auto found_io_prefix =
+          found_stats->second.a_io_prefix_stats.find(time_in_sec);
+      if (found_io_prefix == found_stats->second.a_io_prefix_stats.end()) {
+        std::map<std::string, uint32_t> tmp_io_map;
+        found_stats->second.a_io_prefix_stats[time_in_sec] = tmp_io_map;
+      }
+      if (found_stats->second.a_io_prefix_stats[time_in_sec].find(prefix) ==
+          found_stats->second.a_io_prefix_stats[time_in_sec].end()) {
+        found_stats->second.a_io_prefix_stats[time_in_sec][prefix] = 1;
+      } else {
+        found_stats->second.a_io_prefix_stats[time_in_sec][prefix]++;
+      }
+    }
   }
 
   if (cfs_.find(cf_id) == cfs_.end()) {
@@ -849,6 +961,11 @@ Status TraceAnalyzer::OpenStatsOutputFiles(const std::string& type,
       new_stats.w_prefix_cut_f =
           CreateOutputFile(type, new_stats.cf_name, "whole_key_prefix_cut.txt");
     }
+
+    if (analyzer_opts_.output_io_stats) {
+      new_stats.a_top_io_prefix_f = CreateOutputFile(
+          type, new_stats.cf_name, "accessed_top_k_io_prefix_cut.txt");
+    }
   }
 
   if (analyzer_opts_.output_time_serial) {
@@ -910,6 +1027,14 @@ void TraceAnalyzer::CloseOutputFiles() {
 
       if (i->second.a_value_size_f != nullptr) {
         fclose(i->second.a_value_size_f);
+      }
+
+      if (i->second.a_io_f != nullptr) {
+        fclose(i->second.a_io_f);
+      }
+
+      if (i->second.a_top_io_prefix_f != nullptr) {
+        fclose(i->second.a_top_io_prefix_f);
       }
 
       if (i->second.w_key_f != nullptr) {
@@ -1102,6 +1227,7 @@ void TraceAnalyzer::PrintGetStatistics() {
       continue;
     }
     ta_[type].total_keys = 0;
+    ta_[type].total_access = 0;
     printf("\n################# Operation Type: %s #####################\n",
            ta_[type].type_name.c_str());
     printf("Peak IO is: %u Average IO is: %f\n", io_peak_[type], io_ave_[type]);
@@ -1124,6 +1250,7 @@ void TraceAnalyzer::PrintGetStatistics() {
       }
       cfs_[i->second.cf_id].a_count += total_a_keys;
       ta_[type].total_keys += total_a_keys;
+      ta_[type].total_access += i->second.a_count;
       printf("*********************************************************\n");
       printf("colume family id: %u\n", i->second.cf_id);
       printf("Total unique keys in this cf: %" PRIu64 "\n", total_a_keys);
@@ -1147,6 +1274,27 @@ void TraceAnalyzer::PrintGetStatistics() {
           printf("Access_count: %" PRIu64 " %s\n",
                  i->second.top_k_queue.top().first, hex_key.c_str());
           i->second.top_k_queue.pop();
+        }
+      }
+
+      // print the top k access prefix range and
+      // top k prefix range with highest average access per key
+      if (analyzer_opts_.output_prefix_cut) {
+        printf("The Top %d accessed prefix range:\n", analyzer_opts_.top_k);
+        while (!i->second.top_k_prefix_access.empty()) {
+          printf("Prefix: %s Access count: %" PRIu64 "\n",
+                 i->second.top_k_prefix_access.top().second.c_str(),
+                 i->second.top_k_prefix_access.top().first);
+          i->second.top_k_prefix_access.pop();
+        }
+
+        printf("The Top %d prefix with highest access per key:\n",
+               analyzer_opts_.top_k);
+        while (!i->second.top_k_prefix_ave.empty()) {
+          printf("Prefix: %s access per key: %f\n",
+                 i->second.top_k_prefix_ave.top().second.c_str(),
+                 i->second.top_k_prefix_ave.top().first);
+          i->second.top_k_prefix_ave.pop();
         }
       }
 
@@ -1199,8 +1347,15 @@ void TraceAnalyzer::PrintGetStatistics() {
     printf("Average IO per second: %f Peak IO: %u\n",
             io_ave_[taTypeNum], io_peak_[taTypeNum]);
     printf("Total_requests: %" PRIu64 " Total_accessed_keys: %" PRIu64
-           " Total_gets: %" PRIu64 " Total_writes: %" PRIu64 "\n",
+           " Total_gets: %" PRIu64 " Total_write_batch: %" PRIu64 "\n",
            total_requests_, total_access_keys_, total_gets_, total_writes_);
+    for (int type = 0; type < taTypeNum; type++) {
+      if (!ta_[type].enabled) {
+        continue;
+      }
+      printf("Operation: '%s' has: %" PRIu64 "\n", ta_[type].type_name.c_str(),
+             ta_[type].total_access);
+    }
   }
 }
 
@@ -1236,21 +1391,36 @@ void print_help() {
       The directory to store the output files
     --output_prefix=<the prefix of all output>
       The prefix used for all the output files
-    --output_key_stats
+   --output_key_stats
       Output the key access count statistics to file
+      for accessed keys:
+      format:[cf_id value_size acess_keyid access_count]
+      for whole key space:
+      format:[whole_key_space_keyid access_count]
     --output_access_count_stats
       Output the access count distribution statistics to file
+      format:[access_count number_of_access_count]
     --output_time_serial=<trace collect time>
       Output the access time sequence of keys with key space of GET
+      format:[type_id time_in_sec access_key_id]
     --output_prefix_cut=<# of byte as prefix to cut>
       Output the key space cut point based on the prefix
+      for accessed keys:
+      format:[acessed_keyid access_count num_keys average_access prefix]
+      for whole key space:
+      format:[start_keyid_in_whole_keyspace prefix]
+      if used with output_io_stats
+      format:[time_in_sec IO_num]
+             [prefix access_count_in_this_time_sec]
     --output_trace_sequence
       Out put the trace sequence for further processing
       including the type, cf_id, ts, value_sze, key. This file
       will be extremely large (similar size as the original trace)
+      format:[type_id cf_id value_size time_in_micorsec <key>]
     --output_io_stats
       Output the statistics of the IO per second, the IO including all
       operations
+      format:[operation_count_in_this_second]
     --output_correlation=<[correlation pairs][.,.]>
       Output the operation correlations between the pairs of operations
       listed in the parameter, input should select the operations from:

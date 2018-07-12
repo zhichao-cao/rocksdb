@@ -123,9 +123,22 @@ struct TraceStats {
   std::map<uint64_t, uint64_t> a_key_size_stats;
   std::map<uint64_t, uint64_t> a_value_size_stats;
   std::map<uint32_t, uint32_t> a_io_stats;
+  std::map<uint32_t, std::map<std::string, uint32_t>> a_io_prefix_stats;
   std::priority_queue<std::pair<uint64_t, std::string>,
                   std::vector<std::pair<uint64_t, std::string>>,
                   std::greater<std::pair<uint64_t, std::string>>> top_k_queue;
+  std::priority_queue<std::pair<uint64_t, std::string>,
+                      std::vector<std::pair<uint64_t, std::string>>,
+                      std::greater<std::pair<uint64_t, std::string>>>
+                      top_k_prefix_access;
+  std::priority_queue<std::pair<double, std::string>,
+                      std::vector<std::pair<double, std::string>>,
+                      std::greater<std::pair<double, std::string>>>
+                      top_k_prefix_ave;
+  std::priority_queue<std::pair<uint32_t, uint32_t>,
+                      std::vector<std::pair<uint32_t, uint32_t>>,
+                      std::greater<std::pair<uint32_t, uint32_t>>>
+                      top_k_io_sec;
   std::list<TraceUnit> time_serial;
   std::vector<std::pair<uint64_t, uint64_t>> corre_output;
 
@@ -135,6 +148,7 @@ struct TraceStats {
   FILE* a_prefix_cut_f;
   FILE* a_value_size_f;
   FILE* a_io_f;
+  FILE* a_top_io_prefix_f;
   FILE* w_key_f;
   FILE* w_prefix_cut_f;
 
@@ -147,6 +161,7 @@ struct TypeUnit {
   std::string type_name;
   bool enabled;
   uint64_t total_keys;
+  uint64_t total_access;
   std::map<uint32_t, TraceStats> stats;
 };
 
@@ -230,6 +245,7 @@ class TraceAnalyzer {
   Status WriteTraceSequence(const uint32_t& type, const uint32_t& cf_id,
                             const std::string& key, const size_t value_size,
                             const uint64_t ts);
+  Status MakeStatisticKeyStatsOrPrefix(TraceStats& stats);
   Status MakeStatisticCorrelation(TraceStats& stats, StatsUnit& unit);
   Status MakeStatisticIO();
 };
