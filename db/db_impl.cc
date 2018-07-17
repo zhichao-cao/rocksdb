@@ -1029,17 +1029,6 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
   auto cfh = reinterpret_cast<ColumnFamilyHandleImpl*>(column_family);
   auto cfd = cfh->cfd();
 
-  trace_mutex_.Lock();
-  if (tracer_.get() == nullptr) {
-    TraceOptions trace_opts;
-    std::string trace_filename = "/data/trace/trace";
-    StartTrace(trace_opts, trace_filename);
-  }
-  if (tracer_) {
-    tracer_->TraceGet(key, cfd->GetID());
-  }
-  trace_mutex_.Unlock();
-
   // Acquire SuperVersion
   SuperVersion* sv = GetAndRefSuperVersion(cfd);
 
@@ -1124,6 +1113,22 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
     MeasureTime(stats_, BYTES_PER_READ, size);
     PERF_COUNTER_ADD(get_read_bytes, size);
   }
+
+  trace_mutex_.Lock();
+  if (tracer_.get() == nullptr) {
+    TraceOptions trace_opts;
+    std::string trace_filename = "/data/trace/trace";
+    StartTrace(trace_opts, trace_filename);
+  }
+  if (tracer_) {
+    if (s.ok()) {
+      tracer_->TraceGet(key, cfd->GetID(), 1);
+    } else {
+      tracer_->TraceGet(key, cfd->GetID(), 0);
+    }
+  }
+  trace_mutex_.Unlock();
+
   return s;
 }
 

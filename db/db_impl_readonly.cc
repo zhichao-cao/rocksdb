@@ -36,17 +36,6 @@ Status DBImplReadOnly::Get(const ReadOptions& read_options,
   auto cfh = reinterpret_cast<ColumnFamilyHandleImpl*>(column_family);
   auto cfd = cfh->cfd();
 
-  trace_mutex_.Lock();
-  if (tracer_.get() == nullptr) {
-    TraceOptions trace_opts;
-    std::string trace_filename = "/data/trace/trace";
-    StartTrace(trace_opts, trace_filename);
-  }
-  if (tracer_) {
-    tracer_->TraceGet(key, cfd->GetID());
-  }
-  trace_mutex_.Unlock();
-
   SuperVersion* super_version = cfd->GetSuperVersion();
   MergeContext merge_context;
   RangeDelAggregator range_del_agg(cfd->internal_comparator(), snapshot);
@@ -59,6 +48,22 @@ Status DBImplReadOnly::Get(const ReadOptions& read_options,
     super_version->current->Get(read_options, lkey, pinnable_val, &s,
                                 &merge_context, &range_del_agg);
   }
+
+  trace_mutex_.Lock();
+  if (tracer_.get() == nullptr) {
+    TraceOptions trace_opts;
+    std::string trace_filename = "/data/trace/trace";
+    StartTrace(trace_opts, trace_filename);
+  }
+  if (tracer_) {
+    if (s.ok()) {
+      tracer_->TraceGet(key, cfd->GetID(), 1);
+    } else {
+      tracer_->TraceGet(key, cfd->GetID(), 0);
+    }
+  }
+  trace_mutex_.Unlock();
+
   return s;
 }
 

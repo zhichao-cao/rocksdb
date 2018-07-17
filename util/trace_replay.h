@@ -34,11 +34,13 @@ struct Trace {
   uint64_t ts;
   TraceType type;
   uint32_t cf_id;
+  uint32_t get_ret;  // 0 is not found, 1 is found
   std::string payload;
 
   void reset() {
     ts = 0;
     type = kTraceMax;
+    get_ret = 0;
     payload.clear();
   }
 };
@@ -50,8 +52,8 @@ class Tracer {
 
   Status TraceWrite(WriteBatch* write_batch,
                     const uint32_t& cf_id);
-  Status TraceGet(const Slice& key,
-                  const uint32_t& cf_id);
+  Status TraceGet(const Slice& key, const uint32_t& cf_id,
+                  const uint32_t& get_ret);
   Status TraceIter(const Slice& key,
                   const uint32_t& cf_id);
 
@@ -107,7 +109,7 @@ class TraceWriter {
   Env* env_;
   unique_ptr<WritableFileWriter> file_writer_;
 
-  const unsigned int kMetadataSize = 13;
+  const unsigned int kMetadataSize = 17;
 };
 
 }  // namespace rocksdb

@@ -28,6 +28,8 @@ Status TraceWriter::WriteHeader() {
 
   Trace trace;
   trace.ts = env_->NowMicros();
+  trace.cf_id = 0;
+  trace.get_ret = 0;
   trace.type = kTraceBegin;
   trace.payload = header;
 
@@ -42,22 +44,12 @@ Status TraceWriter::WriteRecord(Trace& trace) {
   std::string metadata(kMetadataSize, '\0');
   EncodeFixed64(&metadata[0], trace.ts);
   EncodeFixed32(&metadata[8], trace.cf_id);
+  EncodeFixed32(&metadata[12], trace.get_ret);
   metadata[kMetadataSize - 1] = trace.type;
   s = file_writer_->Append(Slice(metadata));
   if (!s.ok()) {
     return s;
   }
-
-  /*
-  // Colume family name
-  std::string cf_length;
-  PutFixed32(&cf_length, static_cast<uint32_t>(trace.cf_name.size()));
-  s = file_writer_->Append(cf_length);
-  if (!s.ok()) {
-    return s;
-  }
-  s = file_writer_->Append(Slice(trace.cf_name));
-  */
 
   // Payload
   std::string payload_length;
@@ -128,6 +120,19 @@ Status TraceReader::ReadRecord(Trace& trace) {
   assert(buffer_ != nullptr);
   uint32_t cf_id = DecodeFixed32(buffer_);
   trace.cf_id = cf_id;
+
+  // Read the Get result
+  s = file_reader_->Read(offset_, 4, &result_, buffer_);
+  if (!s.ok()) {
+    return s;
+  }
+  if (result_.size() < 4) {
+    return Status::Corruption("Corrupted trace file.");
+  }
+  offset_ += 4;
+  assert(buffer_ != nullptr);
+  uint32_t get_ret = DecodeFixed32(buffer_);
+  trace.get_ret = get_ret;
 
   // Read TraceType
   s = file_reader_->Read(offset_, 1, &result_, buffer_);
@@ -220,16 +225,18 @@ Status Tracer::TraceWrite(WriteBatch* write_batch,
   trace.ts = env_->NowMicros();
   trace.type = kTraceWrite;
   trace.cf_id = cf_id;
+  trace.get_ret = 0;
   trace.payload = write_batch->Data();
   return trace_writer_->WriteRecord(trace);
 }
 
-Status Tracer::TraceGet(const Slice& key,
-                        const uint32_t& cf_id) {
+Status Tracer::TraceGet(const Slice& key, const uint32_t& cf_id,
+                        const uint32_t& get_ret) {
   Trace trace;
   trace.ts = env_->NowMicros();
   trace.type = kTraceGet;
   trace.cf_id = cf_id;
+  trace.get_ret = get_ret;
   trace.payload = key.ToString();
   return trace_writer_->WriteRecord(trace);
 }
@@ -240,6 +247,7 @@ Status Tracer::TraceIter(const Slice& key,
   trace.ts = env_->NowMicros();
   trace.type = kTraceIter;
   trace.cf_id = cf_id;
+  trace.get_ret = 0;
   trace.payload = key.ToString();
   return trace_writer_->WriteRecord(trace);
 }
