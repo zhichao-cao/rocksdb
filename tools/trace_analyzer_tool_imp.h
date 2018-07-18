@@ -59,7 +59,6 @@ struct StatsUnit {
   size_t value_size;
   uint64_t access_count;
   uint64_t latest_ts;
-  uint32_t latest_type;
   uint64_t succ_count;  // current only used to count Get if key found
   std::vector<TypeCorre> v_corre;
 };
@@ -236,7 +235,7 @@ class TraceAnalyzer {
                            const std::string& key, const size_t value_size,
                            const uint64_t ts);
   Status StatsUnitCorreUpdate(StatsUnit& unit, const uint32_t& type,
-                              const uint64_t& ts);
+                              const uint64_t& ts, const std::string& key);
   Status OpenStatsOutputFiles(const std::string& type, TraceStats& new_stats);
   FILE* CreateOutputFile(const std::string& type, const std::string& cf_name,
                          const std::string& ending);

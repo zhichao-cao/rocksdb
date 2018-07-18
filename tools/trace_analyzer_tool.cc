@@ -888,13 +888,16 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
   unit.value_size = value_size;
   unit.access_count = 1;
   unit.latest_ts = ts;
-  unit.latest_type = type;
   if (type != taGet || value_size > 0) {
     unit.succ_count = 1;
   } else {
     unit.succ_count = 0;
   }
   unit.v_corre.resize(analyzer_opts_.corre_list.size());
+  for (int i = 0; i < (static_cast<int>(analyzer_opts_.corre_list.size())); i++) {
+    unit.v_corre[i].count = 0;
+    unit.v_corre[i].total_ts = 0;
+  }
   std::string prefix;
   if (analyzer_opts_.output_prefix_cut) {
     prefix = key.substr(0, analyzer_opts_.prefix_cut);
@@ -921,6 +924,9 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     new_stats.a_value_size_sqsum = value_size * value_size;
     new_stats.a_value_size_sum = value_size;
     s = OpenStatsOutputFiles(ta_[type].type_name, new_stats);
+    if (analyzer_opts_.output_correlation) {
+      s = StatsUnitCorreUpdate(unit, type, ts, key);
+    }
     new_stats.a_key_stats[key] = unit;
     new_stats.a_value_size_stats[dist_value_size] = 1;
     new_stats.a_io_stats[time_in_sec] = 1;
@@ -946,7 +952,7 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
         found_key->second.succ_count++;
       }
       if (analyzer_opts_.output_correlation) {
-        s = StatsUnitCorreUpdate(found_key->second, type, ts);
+        s = StatsUnitCorreUpdate(found_key->second, type, ts, key);
       }
     }
 
@@ -1004,20 +1010,31 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
 
 Status TraceAnalyzer::StatsUnitCorreUpdate(StatsUnit& unit,
                                            const uint32_t& type,
-                                           const uint64_t& ts) {
+                                           const uint64_t& ts,
+                                           const std::string& key) {
   if (type >= taTypeNum) {
     fprintf(stderr, "Unknown Type Id: %u\n", type);
     exit(1);
   }
-  int corre_idx = analyzer_opts_.corre_map[unit.latest_type][type];
-  if (corre_idx < 0 || corre_idx >= static_cast<int>(unit.v_corre.size())) {
-    return Status::OK();
+
+  for (int i = 0; i<taTypeNum; i++) {
+    if (analyzer_opts_.corre_map[i][type] < 0 ||
+        ta_[i].stats.find(unit.cf_id) == ta_[i].stats.end()||
+        ta_[i].stats[unit.cf_id].a_key_stats.find(key) ==
+        ta_[i].stats[unit.cf_id].a_key_stats.end() ||
+        ta_[i].stats[unit.cf_id].a_key_stats[key].latest_ts == ts) {
+      continue;
+    }
+
+    int corre_id = analyzer_opts_.corre_map[i][type];
+
+    //after get the x-y operation time or x, update;
+    unit.v_corre[corre_id].count++;
+    unit.v_corre[corre_id].total_ts += (ts -
+        ta_[i].stats[unit.cf_id].a_key_stats[key].latest_ts);
   }
 
-  unit.v_corre[corre_idx].count++;
-  unit.v_corre[corre_idx].total_ts += (ts - unit.latest_ts);
   unit.latest_ts = ts;
-  unit.latest_type = type;
   return Status::OK();
 }
 
