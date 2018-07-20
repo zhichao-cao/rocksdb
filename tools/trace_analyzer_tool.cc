@@ -1518,14 +1518,16 @@ void print_help() {
           R"(trace_analyzer --trace_file=<trace file path> [--comman=]
     --trace_file=<trace file path>
       The trace path
+    --intput_key_space_dir=<the directory stores full key space files>
+      The key space file should be named as <column family name>.txt
     --output_dir=<the output dir>
       The directory to store the output files
     --output_prefix=<the prefix of all output>
       The prefix used for all the output files
-   --output_key_stats
+    --output_key_stats
       Output the key access count statistics to file
       for accessed keys:
-      format:[cf_id value_size acess_keyid access_count]
+      format:[cf_id value_size access_keyid access_count]
       for whole key space:
       format:[whole_key_space_keyid access_count]
     --output_access_count_stats
@@ -1540,7 +1542,7 @@ void print_help() {
       format:[acessed_keyid access_count num_keys average_access prefix]
       for whole key space:
       format:[start_keyid_in_whole_keyspace prefix]
-      if used with output_io_stats
+      if used with --output_io_stats
       format:[time_in_sec IO_num]
              [prefix access_count_in_this_time_sec]
     --output_trace_sequence
@@ -1557,8 +1559,6 @@ void print_help() {
       listed in the parameter, input should select the operations from:
       get, put, delete, single_delete, rangle_delete, merge. No space
       between the pairs separated by commar. Example: =[get,get][put,get]
-    --intput_key_space_dir=<the directory stores full key space files>
-      The key space file should be named as <column family name>.txt
     --use_get
       Analyze the Get operations
     --use_put
@@ -1573,22 +1573,22 @@ void print_help() {
       Analyze the MERGE operations
     --use_iterator
       Analyze the iterate operation like seek() and seekForPre()
-    --no_key
-      Does not output the key to the result files to make them smaller
     --print_overall_stats
       Print the stats of the whole trace, like total requests, keys, and etc.
     --print_key_distribution
       Print the key size distribution
     --print_value_distribution
       Print the value size distribution, only available for write
-    --print_top_k_access=<the number of top keys>
-      Print the top k keys that have been accessed most
+    --print_top_k_access=<top K to be printed>
+      Print the top k accessed keys, top k accessed prefix, top K QPS, and etc.
     --output_ignore_count=
       ignores the access count <= this value to shorter the output
     --value_interval=
       To output the value distribution, we need to set the value intervals and
       make the statistic of the value size distribution in different intervals
       The default is 128B
+    --no_key
+      Does not output the key to the result files to make them smaller
  )");
 }
 
