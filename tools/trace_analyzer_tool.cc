@@ -318,6 +318,9 @@ Status TraceAnalyzer::StartProcessing() {
       total_writes_++;
       c_time_ = trace.ts;
       WriteBatch batch(trace.payload);
+      if(batch.HasBeginPrepare() && !batch.HasCommit()) {
+        continue;
+      }
       TraceWriteHandler write_handler(this);
       s = batch.Iterate(&write_handler);
       if (!s.ok()) {
