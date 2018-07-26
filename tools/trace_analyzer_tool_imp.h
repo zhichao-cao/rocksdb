@@ -143,15 +143,15 @@ struct TraceStats {
   std::list<TraceUnit> time_serial;
   std::vector<std::pair<uint64_t, uint64_t>> corre_output;
 
-  FILE* time_serial_f;
-  FILE* a_key_f;
-  FILE* a_count_dist_f;
-  FILE* a_prefix_cut_f;
-  FILE* a_value_size_f;
-  FILE* a_io_f;
-  FILE* a_top_io_prefix_f;
-  FILE* w_key_f;
-  FILE* w_prefix_cut_f;
+  std::unique_ptr<rocksdb::WritableFile> time_serial_f;
+  std::unique_ptr<rocksdb::WritableFile> a_key_f;
+  std::unique_ptr<rocksdb::WritableFile> a_count_dist_f;
+  std::unique_ptr<rocksdb::WritableFile> a_prefix_cut_f;
+  std::unique_ptr<rocksdb::WritableFile> a_value_size_f;
+  std::unique_ptr<rocksdb::WritableFile> a_io_f;
+  std::unique_ptr<rocksdb::WritableFile> a_top_io_prefix_f;
+  std::unique_ptr<rocksdb::WritableFile> w_key_f;
+  std::unique_ptr<rocksdb::WritableFile> w_prefix_cut_f;
 
   TraceStats();
   ~TraceStats();
@@ -210,6 +210,7 @@ class TraceAnalyzer {
 
  private:
   rocksdb::Env* env_;
+  EnvOptions env_options_;
   unique_ptr<rocksdb::TraceReader> trace_reader_;
   size_t offset_;
   char *buffer_;
@@ -223,9 +224,9 @@ class TraceAnalyzer {
   uint64_t total_writes_;
   uint64_t begin_time_;
   uint64_t end_time_;
-  FILE* trace_sequence_f;  // output the trace sequence for further process
-  FILE* iops_f;            // output the requests per second
-  std::ifstream wkey_input_f;
+  std::unique_ptr<rocksdb::WritableFile> trace_sequence_f_;  // readable trace
+  std::unique_ptr<rocksdb::WritableFile> qps_f_;             // overall qps
+  std::unique_ptr<rocksdb::SequentialFile> wkey_input_f_;
   std::vector<TypeUnit> ta_;  // The main statistic collecting data structure
   std::map<uint32_t, CfUnit> cfs_;  // All the cf_id appears in this trace;
   std::vector<uint32_t> io_peak_;
@@ -237,12 +238,14 @@ class TraceAnalyzer {
   Status StatsUnitCorreUpdate(StatsUnit& unit, const uint32_t& type,
                               const uint64_t& ts, const std::string& key);
   Status OpenStatsOutputFiles(const std::string& type, TraceStats& new_stats);
-  FILE* CreateOutputFile(const std::string& type, const std::string& cf_name,
-                         const std::string& ending);
+  Status CreateOutputFile(const std::string& type, const std::string& cf_name,
+                          const std::string& ending,
+                          std::unique_ptr<rocksdb::WritableFile>* f_ptr);
   void CloseOutputFiles();
 
   void PrintGetStatistics();
-  Status TraceUnitWriter(FILE *file_p, TraceUnit &unit);
+  Status TraceUnitWriter(std::unique_ptr<rocksdb::WritableFile>& f_ptr,
+                         TraceUnit& unit);
   std::string MicrosdToDate(uint64_t time);
 
   Status WriteTraceSequence(const uint32_t& type, const uint32_t& cf_id,
