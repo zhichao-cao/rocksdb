@@ -28,24 +28,23 @@ class WriteBatch;
 class AnalyzerOptions;
 class TraceWriteHandler;
 
-const int taTypeNum = 7;
-
-enum TraceOperationType : uint32_t {
-  taGet = 0,
-  taPut = 1,
-  taDelete = 2,
-  taSingleDelete = 3,
-  taRangeDelete = 4,
-  taMerge = 5,
-  taIter = 6
+enum TraceOperationType : int {
+  kGet = 0,
+  kPut = 1,
+  kDelete = 2,
+  kSingleDelete = 3,
+  kRangeDelete = 4,
+  kMerge = 5,
+  kIter = 6,
+  kTaTypeNum = 7
 };
 
 struct TraceUnit {
-  uint32_t type;
-  std::string key;
-  size_t value_size;
   uint64_t ts;
+  uint32_t type;
   uint32_t cf_id;
+  size_t value_size;
+  std::string key;
 };
 
 struct TypeCorre {
@@ -55,45 +54,16 @@ struct TypeCorre {
 
 struct StatsUnit {
   uint64_t key_id;
-  uint32_t cf_id;
-  size_t value_size;
   uint64_t access_count;
   uint64_t latest_ts;
   uint64_t succ_count;  // current only used to count Get if key found
+  uint32_t cf_id;
+  size_t value_size;
   std::vector<TypeCorre> v_corre;
 };
 
 class AnalyzerOptions {
  public:
-  bool output_key_stats;
-  bool output_access_count_stats;
-  bool output_trace_unit;
-  bool output_time_serial;
-  bool output_prefix_cut;
-  bool output_trace_sequence;
-  bool output_io_stats;
-  bool output_correlation;
-  bool input_key_space;
-  bool use_get;
-  bool use_put;
-  bool use_delete;
-  bool use_single_delete;
-  bool use_range_delete;
-  bool use_merge;
-  bool use_iterator;
-  bool no_key;
-  bool print_overall_stats;
-  bool print_key_distribution;
-  bool print_value_distribution;
-  bool print_top_k_access;
-  bool special;
-  uint64_t output_ignore_count;
-  uint64_t start_time;
-  int value_interval;
-  int top_k;
-  int prefix_cut;
-  std::string output_prefix;
-  std::string key_space_dir;
   std::vector<std::vector<int>> corre_map;
   std::vector<std::pair<int, int>> corre_list;
 
@@ -116,14 +86,14 @@ struct TraceStats {
   uint64_t a_value_size_sqsum;
   uint64_t a_value_size_sum;
   uint64_t a_value_mid;
-  uint32_t a_peak_io;
-  double a_ave_io;
+  uint32_t a_peak_qps;
+  double a_ave_qps;
   std::map<std::string, StatsUnit> a_key_stats;
   std::map<uint64_t, uint64_t> a_count_stats;
   std::map<uint64_t, uint64_t> a_key_size_stats;
   std::map<uint64_t, uint64_t> a_value_size_stats;
-  std::map<uint32_t, uint32_t> a_io_stats;
-  std::map<uint32_t, std::map<std::string, uint32_t>> a_io_prefix_stats;
+  std::map<uint32_t, uint32_t> a_qps_stats;
+  std::map<uint32_t, std::map<std::string, uint32_t>> a_qps_prefix_stats;
   std::priority_queue<std::pair<uint64_t, std::string>,
                       std::vector<std::pair<uint64_t, std::string>>,
                       std::greater<std::pair<uint64_t, std::string>>>
@@ -139,17 +109,17 @@ struct TraceStats {
   std::priority_queue<std::pair<uint32_t, uint32_t>,
                       std::vector<std::pair<uint32_t, uint32_t>>,
                       std::greater<std::pair<uint32_t, uint32_t>>>
-      top_k_io_sec;
-  std::list<TraceUnit> time_serial;
+      top_k_qps_sec;
+  std::list<TraceUnit> time_series;
   std::vector<std::pair<uint64_t, uint64_t>> corre_output;
 
-  std::unique_ptr<rocksdb::WritableFile> time_serial_f;
+  std::unique_ptr<rocksdb::WritableFile> time_series_f;
   std::unique_ptr<rocksdb::WritableFile> a_key_f;
   std::unique_ptr<rocksdb::WritableFile> a_count_dist_f;
   std::unique_ptr<rocksdb::WritableFile> a_prefix_cut_f;
   std::unique_ptr<rocksdb::WritableFile> a_value_size_f;
-  std::unique_ptr<rocksdb::WritableFile> a_io_f;
-  std::unique_ptr<rocksdb::WritableFile> a_top_io_prefix_f;
+  std::unique_ptr<rocksdb::WritableFile> a_qps_f;
+  std::unique_ptr<rocksdb::WritableFile> a_top_qps_prefix_f;
   std::unique_ptr<rocksdb::WritableFile> w_key_f;
   std::unique_ptr<rocksdb::WritableFile> w_prefix_cut_f;
 
@@ -206,8 +176,6 @@ class TraceAnalyzer {
   Status HandleIterCF(uint32_t column_family_id, const std::string& key,
                       const uint64_t& ts);
 
-  Status SpecialProcessing();
-
  private:
   rocksdb::Env* env_;
   EnvOptions env_options_;
@@ -229,8 +197,8 @@ class TraceAnalyzer {
   std::unique_ptr<rocksdb::SequentialFile> wkey_input_f_;
   std::vector<TypeUnit> ta_;  // The main statistic collecting data structure
   std::map<uint32_t, CfUnit> cfs_;  // All the cf_id appears in this trace;
-  std::vector<uint32_t> io_peak_;
-  std::vector<double> io_ave_;
+  std::vector<uint32_t> qps_peak_;
+  std::vector<double> qps_ave_;
 
   Status KeyStatsInsertion(const uint32_t& type, const uint32_t& cf_id,
                            const std::string& key, const size_t value_size,
@@ -253,7 +221,7 @@ class TraceAnalyzer {
                             const uint64_t ts);
   Status MakeStatisticKeyStatsOrPrefix(TraceStats& stats);
   Status MakeStatisticCorrelation(TraceStats& stats, StatsUnit& unit);
-  Status MakeStatisticIO();
+  Status MakeStatisticQPS();
 };
 
 // write bach handler to be used for WriteBache iterator
@@ -288,22 +256,6 @@ class TraceWriteHandler : public WriteBatch::Handler {
   virtual Status MergeCF(uint32_t column_family_id, const Slice& key,
                          const Slice& value) override {
     return ta_ptr->HandleMergeCF(column_family_id, key, value);
-  }
-  virtual void LogData(const Slice& blob) override {
-    tmp_use = blob.ToString();
-  }
-  // virtual Status MarkBeginPrepare() override { return Status::OK(); }
-  virtual Status MarkEndPrepare(const Slice& xid) override {
-    tmp_use = xid.ToString();
-    return Status::OK();
-  }
-  virtual Status MarkCommit(const Slice& xid) override {
-    tmp_use = xid.ToString();
-    return Status::OK();
-  }
-  virtual Status MarkRollback(const Slice& xid) override {
-    tmp_use = xid.ToString();
-    return Status::OK();
   }
 };
 
