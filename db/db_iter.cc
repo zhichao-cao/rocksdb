@@ -1257,7 +1257,7 @@ void DBIter::Seek(const Slice& target) {
     db_impl_->trace_mutex_.Lock();
     if (db_impl_->tracer_.get() == nullptr) {
       TraceOptions trace_opts;
-      std::string trace_filename = "/data/trace/trace";
+      std::string trace_filename = db_impl_->GetName();
       db_impl_->StartTrace(trace_opts, trace_filename);
     }
     if (db_impl_->tracer_) {
@@ -1322,7 +1322,7 @@ void DBIter::SeekForPrev(const Slice& target) {
     db_impl_->trace_mutex_.Lock();
     if (db_impl_->tracer_.get() == nullptr) {
       TraceOptions trace_opts;
-      std::string trace_filename = "/data/trace/trace";
+      std::string trace_filename = db_impl_->GetName();
       db_impl_->StartTrace(trace_opts, trace_filename);
     }
     if (db_impl_->tracer_) {

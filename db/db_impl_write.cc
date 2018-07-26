@@ -79,7 +79,7 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
   trace_mutex_.Lock();
   if (tracer_.get() == nullptr) {
     TraceOptions trace_opts;
-    std::string trace_filename = "/data/trace/trace";
+    std::string trace_filename = GetName();
     StartTrace(trace_opts, trace_filename);
   }
   if (tracer_) {

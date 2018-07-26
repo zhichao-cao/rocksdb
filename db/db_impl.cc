@@ -1117,7 +1117,7 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
   trace_mutex_.Lock();
   if (tracer_.get() == nullptr) {
     TraceOptions trace_opts;
-    std::string trace_filename = "/data/trace/trace";
+    std::string trace_filename = GetName();
     StartTrace(trace_opts, trace_filename);
   }
   if (tracer_) {
@@ -3075,7 +3075,8 @@ Status DBImpl::StartTrace(const TraceOptions& /* options */,
   EnvOptions env_options;
   unique_ptr<WritableFile> trace_file;
   std::string trace_filename =
-      old_trace_filename + "." + std::to_string(env_->NowMicros());
+      old_trace_filename + "/trace." + std::to_string(env_->NowMicros());
+  printf("%s\n",trace_filename.c_str());
   Status s = env_->NewWritableFile(trace_filename, &trace_file, env_options);
   if (s.ok()) {
     unique_ptr<WritableFileWriter> file_writer;
