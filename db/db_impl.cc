@@ -3076,7 +3076,8 @@ Status DBImpl::StartTrace(const TraceOptions& /* options */,
   EnvOptions env_options;
   unique_ptr<WritableFile> trace_file;
   std::string trace_filename =
-      old_trace_filename + "." + std::to_string(env_->NowMicros());
+  //    old_trace_filename + "." + std::to_string(env_->NowMicros());
+        old_trace_filename;
   Status s = env_->NewWritableFile(trace_filename, &trace_file, env_options);
   if (s.ok()) {
     unique_ptr<WritableFileWriter> file_writer;

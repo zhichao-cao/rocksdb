@@ -5,7 +5,7 @@
 //
 #ifndef ROCKSDB_LITE
 
-#include "tools/trace_analyzer_tool_imp.h"
+#include "utilities/trace_analyzer_tool_imp.h"
 
 #include <inttypes.h>
 #include <math.h>
@@ -1431,8 +1431,10 @@ void TraceAnalyzer::PrintGetStatistics() {
     ta_[type].total_succ_access = 0;
     printf("\n################# Operation Type: %s #####################\n",
            ta_[type].type_name.c_str());
-    printf("Peak IO is: %u Average IO is: %f\n", qps_peak_[type],
-           qps_ave_[type]);
+    if (qps_ave_.size() ==  kTaTypeNum + 1) {
+      printf("Peak IO is: %u Average IO is: %f\n", qps_peak_[type],
+             qps_ave_[type]);
+    }
     for (auto& i : ta_[type].stats) {
       if (i.second.a_count == 0) {
         continue;
@@ -1567,8 +1569,10 @@ void TraceAnalyzer::PrintGetStatistics() {
   if (FLAGS_print_overall_stats) {
     printf("\n*********************************************************\n");
     printf("*********************************************************\n");
-    printf("Average QPS per second: %f Peak QPS: %u\n", qps_ave_[kTaTypeNum],
-           qps_peak_[kTaTypeNum]);
+    if (qps_peak_.size() == kTaTypeNum + 1) {
+      printf("Average QPS per second: %f Peak QPS: %u\n", qps_ave_[kTaTypeNum],
+             qps_peak_[kTaTypeNum]);
+    }
     printf("Total_requests: %" PRIu64 " Total_accessed_keys: %" PRIu64
            " Total_gets: %" PRIu64 " Total_write_batch: %" PRIu64 "\n",
            total_requests_, total_access_keys_, total_gets_, total_writes_);

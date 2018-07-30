@@ -1443,6 +1443,9 @@ options_util_test: utilities/options/options_util_test.o $(LIBOBJECTS) $(TESTHAR
 db_bench_tool_test: tools/db_bench_tool_test.o $(BENCHTOOLOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
+trace_analyzer_test: utilities/trace_analyzer_test.o $(BENCHTOOLOBJECTS) $(TESTHARNESS)
+	$(AM_LINK)
+
 event_logger_test: util/event_logger_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
@@ -1491,7 +1494,7 @@ write_unprepared_transaction_test: utilities/transactions/write_unprepared_trans
 sst_dump: tools/sst_dump.o $(LIBOBJECTS)
 	$(AM_LINK)
 
-trace_analyzer: tools/trace_analyzer.o $(LIBOBJECTS)
+trace_analyzer: utilities/trace_analyzer.o $(LIBOBJECTS)
 	        $(AM_LINK)
 
 blob_dump: tools/blob_dump.o $(LIBOBJECTS)

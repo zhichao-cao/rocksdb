@@ -175,6 +175,7 @@ class TraceAnalyzer {
                        const Slice& value);
   Status HandleIterCF(uint32_t column_family_id, const std::string& key,
                       const uint64_t& ts);
+  std::vector<TypeUnit>& GetTaVector() { return ta_; }
 
  private:
   rocksdb::Env* env_;
