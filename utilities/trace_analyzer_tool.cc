@@ -107,7 +107,7 @@ DEFINE_bool(print_overall_stats, true,
 DEFINE_bool(print_key_distribution, false, "Print the key size distribution.");
 DEFINE_bool(output_value_distribution, false,
             "Print the value size distribution, only available for Put.");
-DEFINE_uint32(print_top_k_access, 0,
+DEFINE_uint32(print_top_k_access, 1,
               "<top K of the variables to be printed>"
               "Print the top k accessed keys, top k accessed prefix"
               "and etc.");
@@ -139,7 +139,6 @@ std::string TraceAnalyzer::MicrosdToDate(uint64_t time_in) {
   return date_time;
 }
 
-namespace {
 bool ReadOneLine(std::istringstream* iss, SequentialFile* seq_file,
                  std::string* output, bool* has_data, Status* result) {
   const int kBufferSize = 128;
@@ -176,7 +175,6 @@ bool ReadOneLine(std::istringstream* iss, SequentialFile* seq_file,
   *output = line;
   return *has_data || has_complete_line;
 }
-}  // namespace
 
 // The default constructor of AnalyzerOptions
 AnalyzerOptions::AnalyzerOptions()

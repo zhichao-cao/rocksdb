@@ -28,6 +28,9 @@ class WriteBatch;
 class AnalyzerOptions;
 class TraceWriteHandler;
 
+bool ReadOneLine(std::istringstream* iss, SequentialFile* seq_file,
+                     std::string* output, bool* has_data, Status* result);
+
 enum TraceOperationType : int {
   kGet = 0,
   kPut = 1,
