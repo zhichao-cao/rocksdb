@@ -10,6 +10,8 @@
 #ifndef ROCKSDB_LITE
 
 #include <stdint.h>
+#include <sstream>
+#include <unistd.h>
 
 #include "db/db_test_util.h"
 #include "util/trace_replay.h"
@@ -67,11 +69,21 @@ class TraceAnalyzerTest : public testing::Test {
     ASSERT_OK(db_->Write(wo, &batch));
 
     ASSERT_OK(db_->Get(ro, "a", &value));
+    sleep(1);
     db_->Get(ro, "g", &value);
 
     ASSERT_OK(db_->EndTrace(trace_opt));
 
     ASSERT_OK(env_->FileExists(trace_path));
+
+    std::unique_ptr<WritableFile> whole_f;
+    std::string whole_path = test_path_ + "/0.txt";
+    ASSERT_OK(env_->NewWritableFile(whole_path, &whole_f,env_options_));
+    std::ostringstream whole;
+    whole << "0x61\n" << "0x62\n" << "0x63\n" << "0x64\n" << "0x65\n" << "0x66\n";
+    std::string whole_str(whole.str());
+    ASSERT_OK(whole_f->Append(whole_str));
+
   }
 
   void AppendArgs(const std::vector<std::string>& args) {
@@ -143,13 +155,14 @@ TEST_F(TraceAnalyzerTest, Get) {
   std::string trace_path = test_path_ + "/trace";
   std::string output_path = test_path_ + "/get";
   std::string file_path;
-  std::vector<std::string> paras = {"./trace_analyzer", "-use_get", "-output_trace_sequence", "-output_key_stats", "-output_access_count_stats", "-output_prefix=test", "-output_prefix_cut=1", "-output_time_series=10"};
+  std::vector<std::string> paras = {"./trace_analyzer", "-use_get", "-output_trace_sequence", "-output_key_stats", "-output_access_count_stats", "-output_prefix=test", "-output_prefix_cut=1", "-output_time_series=10", "-output_value_distribution", "-output_qps_stats"};
   Status s = env_->FileExists(trace_path);
   if (!s.ok()) {
     GenerateTrace(trace_path);
   }
   paras.push_back("-output_dir=" + output_path);
   paras.push_back("-trace_file=" + trace_path);
+  paras.push_back("-key_space_dir=" + test_path_);
 
   env_->CreateDir(output_path);
   std::cout<<test_path_<<"\n";
@@ -178,7 +191,27 @@ TEST_F(TraceAnalyzerTest, Get) {
   // Check the time series
   std::vector<std::string> k_series = {"0 1533000630 0", "0 1533000630 1"};
   file_path = output_path + "/test-get-0-time_series.txt";
-  CheckFileContent(k_series, file_path, true);
+  CheckFileContent(k_series, file_path, false);
+
+  // Check the accessed key in whole key space
+  std::vector<std::string> k_whole_access = {"0 1"};
+  file_path = output_path + "/test-get-0-whole_key_stats.txt";
+  CheckFileContent(k_whole_access, file_path, true);
+
+  // Check the whole key prefix cut
+  std::vector<std::string> k_whole_prefix = {"0 0x61", "1 0x62", "2 0x63", "3 0x64", "4 0x65", "5 0x66"};
+  file_path = output_path + "/test-get-0-whole_key_prefix_cut.txt";
+  CheckFileContent(k_whole_prefix, file_path, true);
+
+  // Check the overall qps
+  std::vector<std::string> all_qps = {"1 0 0 0 0 0 0 1"};
+  file_path = output_path + "/test-qps_stats.txt";
+  CheckFileContent(all_qps, file_path, true);
+
+  // Check the qps of get
+  std::vector<std::string> get_qps = {"1"};
+  file_path = output_path + "/test-get-0-qps_stats.txt";
+  CheckFileContent(get_qps, file_path, true);
 
 }
 }  // namespace rocksdb
