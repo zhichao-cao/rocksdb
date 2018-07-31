@@ -81,6 +81,7 @@ DEFINE_bool(output_qps_stats, false,
             "For the overall qps, it will contain all qps of each query type.\n"
             "For each cf and query, it will have its own qps output\n"
             "format:[query_count_in_this_second].");
+DEFINE_bool(no_print, false, "Do not print out any result");
 DEFINE_string(
     output_correlation, "",
     "intput format: [correlation pairs][.,.]\n"
@@ -174,6 +175,16 @@ bool ReadOneLine(std::istringstream* iss, SequentialFile* seq_file,
   }
   *output = line;
   return *has_data || has_complete_line;
+}
+
+uint64_t MultiplyCheckOverflow(uint64_t op1, uint64_t op2) {
+  if (op1 == 0 || op2 == 0) {
+    return 0;
+  }
+  if (port::kMaxUint64 / op1 < op2) {
+    return op1;
+  }
+  return (op1 * op2);
 }
 
 // The default constructor of AnalyzerOptions
@@ -950,6 +961,9 @@ Status TraceAnalyzer::EndProcessing() {
   if (trace_sequence_f_) {
     trace_sequence_f_->Close();
   }
+  if (FLAGS_no_print) {
+    return Status::OK();
+  }
   PrintGetStatistics();
   CloseOutputFiles();
   return Status::OK();
@@ -1001,9 +1015,11 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     ta_[type].stats[cf_id].cf_name = std::to_string(cf_id);
     ta_[type].stats[cf_id].a_count = 1;
     ta_[type].stats[cf_id].akey_id = 0;
-    ta_[type].stats[cf_id].a_key_size_sqsum = key.size() * key.size();
+    ta_[type].stats[cf_id].a_key_size_sqsum = MultiplyCheckOverflow(
+        static_cast<uint64_t>(key.size()), static_cast<uint64_t>(key.size()));
     ta_[type].stats[cf_id].a_key_size_sum = key.size();
-    ta_[type].stats[cf_id].a_value_size_sqsum = value_size * value_size;
+    ta_[type].stats[cf_id].a_value_size_sqsum = MultiplyCheckOverflow(
+        static_cast<uint64_t>(value_size), static_cast<uint64_t>(value_size));
     ta_[type].stats[cf_id].a_value_size_sum = value_size;
     s = OpenStatsOutputFiles(ta_[type].type_name, ta_[type].stats[cf_id]);
     if (!FLAGS_output_correlation.empty()) {
@@ -1021,9 +1037,11 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     }
   } else {
     found_stats->second.a_count++;
-    found_stats->second.a_key_size_sqsum += key.size() * key.size();
+    found_stats->second.a_key_size_sqsum += MultiplyCheckOverflow(
+        static_cast<uint64_t>(key.size()), static_cast<uint64_t>(key.size()));
     found_stats->second.a_key_size_sum += key.size();
-    found_stats->second.a_value_size_sqsum += value_size * value_size;
+    found_stats->second.a_value_size_sqsum += MultiplyCheckOverflow(
+        static_cast<uint64_t>(value_size), static_cast<uint64_t>(value_size));
     found_stats->second.a_value_size_sum += value_size;
     auto found_key = found_stats->second.a_key_stats.find(key);
     if (found_key == found_stats->second.a_key_stats.end()) {
