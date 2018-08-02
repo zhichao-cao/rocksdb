@@ -35,6 +35,17 @@ Status DBImplReadOnly::Get(const ReadOptions& read_options,
   SequenceNumber snapshot = versions_->LastSequence();
   auto cfh = reinterpret_cast<ColumnFamilyHandleImpl*>(column_family);
   auto cfd = cfh->cfd();
+
+  if (tracer_.get() == nullptr) {
+    TraceOptions trace_opts;
+    std::string trace_filename = "/data/trace/trace." + std::to_string(env_->NowMicros());
+    std::unique_ptr<TraceWriter> trace_writer;
+    EnvOptions env_opts;
+    NewFileTraceWriter(env_, env_opts, trace_filename, &trace_writer);
+    StartTrace(trace_opts, std::move(trace_writer));
+  }
+
+
   if (tracer_) {
     InstrumentedMutexLock lock(&trace_mutex_);
     if (tracer_) {

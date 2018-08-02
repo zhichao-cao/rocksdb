@@ -57,6 +57,7 @@
 #include "rocksdb/utilities/sim_cache.h"
 #include "rocksdb/utilities/transaction.h"
 #include "rocksdb/utilities/transaction_db.h"
+#include "rocksdb/utilities/ldb_cmd.h"
 #include "rocksdb/write_batch.h"
 #include "util/cast_util.h"
 #include "util/compression.h"
@@ -120,7 +121,8 @@ DEFINE_string(
     "fillseekseq,"
     "randomtransaction,"
     "randomreplacekeys,"
-    "timeseries",
+    "timeseries"
+    "myrocksim",
 
     "Comma-separated list of operations to run in the specified"
     " order. Available benchmarks:\n"
@@ -190,7 +192,8 @@ DEFINE_string(
     "\tlevelstats  -- Print the number of files and bytes per level\n"
     "\tsstables    -- Print sstable info\n"
     "\theapprofile -- Dump a heap profile (if supported by this port)\n"
-    "\treplay      -- replay the trace file specified with trace_file\n");
+    "\treplay      -- replay the trace file specified with trace_file\n"
+    "\tmyrockssim  -- Simulate Myrocks Get workloads, do N reads\n");
 
 DEFINE_int64(num, 1000000, "Number of key/values to place in database");
 
@@ -1239,6 +1242,119 @@ class ReportFileOpEnv : public EnvWrapper {
 };
 
 }  // namespace
+
+
+struct ExpKeyUnit {
+  int64_t start_access;
+  int64_t start_key;
+  int64_t access_count;
+  int64_t num;
+};
+
+struct ExpKeyUnitCmp {
+  bool operator() (const ExpKeyUnit& a, const int64_t& b) const {
+    return a.start_access > b;
+  }
+};
+
+// Generate the keys according to the two term expe fit
+// given the probability model, you can transfer the random
+// access to such distribution
+// f(x) = a*exp(b*x) + c*exp(d*x)
+// x is the access count of the key
+class GenerateTwoTermExpKeys {
+ public:
+  double a_;
+  double b_;
+  double c_;
+  double d_;
+  int64_t access_num_;
+  int64_t key_num_;
+  int64_t group_num_;
+  bool initiated_;
+  std::vector<ExpKeyUnit> access_set_;
+
+  GenerateTwoTermExpKeys() {
+    access_num_ = FLAGS_num;
+    key_num_ = FLAGS_num;
+    group_num_ = 1;
+    a_ = 0.0;
+    b_ = 0.0;
+    c_ = 0.0;
+    d_ = 0.0;
+    initiated_ = false;
+  }
+
+  ~GenerateTwoTermExpKeys() { }
+
+  Status InitiateExp(const int64_t access, const double a, const double b, const double c, const double d) {
+    access_num_ = access;
+    a_ = a;
+    b_ = b;
+    c_ = c;
+    d_ = d;
+    initiated_ = true;
+    double exp_ran;
+    int64_t cur_access = 0;
+    int64_t cur_keys = 0;
+
+    for(int64_t x = 1; x <= access; x++) {
+      double exp_val = (a_ * std::exp(b_ * x) + c_ * std::exp(d_ * x)) * access * 0.9;
+      if (exp_val < 1.0) {
+        //exp_ran is the number of keys has access count 'x'
+        exp_ran = 1.0;
+      } else {
+        exp_ran = std::floor(exp_val);
+      }
+
+      int64_t access_num = static_cast<int64_t>(exp_ran/x);
+      if(access_num == 0) {
+        access_num = 1;
+      }
+      ExpKeyUnit tmp_unit;
+      tmp_unit.start_access = cur_access;
+      tmp_unit.start_key = cur_keys;
+      tmp_unit.access_count = x;
+      tmp_unit.num = access_num;
+      access_set_.push_back(tmp_unit);
+
+      cur_access += tmp_unit.access_count * tmp_unit.num;
+      cur_keys += tmp_unit.num;
+      if (cur_access >= access) {
+        break;
+      }
+    }
+    access_num_ = cur_access;
+    key_num_ = cur_keys;
+
+    return Status::OK();
+  }
+
+  // Make sure that ini_rand is [0,access_num_);
+  int64_t DirectKeyID(const int64_t& ini_rand) {
+    if(!initiated_ || access_set_.size() == 0) {
+      return (ini_rand % key_num_);
+    }
+
+    if (ini_rand >= access_num_) {
+      return access_set_.back().start_key;
+    }
+
+    int64_t start = 0, end = static_cast<int64_t>(access_set_.size()) - 1;
+    while (start < end) {
+      int64_t mid = start + (end-start)/2;
+      if (ini_rand <= access_set_[mid].start_access) {
+        end = mid;
+      } else {
+        start = mid + 1;
+      }
+    }
+    int64_t diff = ini_rand - access_set_[start].start_access;
+    int64_t offset = diff % access_set_[start].access_count;
+    return (access_set_[start].start_key + offset);
+  }
+
+};
 
 // Helper for quickly generating random data.
 class RandomGenerator {
@@ -2651,6 +2767,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
         }
         fresh_db = true;
         method = &Benchmark::TimeSeries;
+      } else if (name == "myrockssim") {
+        method =  &Benchmark::MyRocksSim;
       } else if (name == "stats") {
         PrintStats("rocksdb.stats");
       } else if (name == "resetstats") {
@@ -5544,6 +5662,69 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       TimeSeriesWrite(thread);
       thread->stats.Stop();
       thread->stats.Report("timeseries write");
+    }
+  }
+
+  void MyRocksSim(ThreadState* thread) {
+    DoWrite(thread, SEQUENTIAL);
+
+    int64_t read = 0;
+    int64_t found = 0;
+    int64_t bytes = 0;
+    std::unique_ptr<const char[]> key_guard;
+    Slice key = AllocateKey(&key_guard);
+    double a = 0.4758, b = -0.382, c = -0.0003245, d = -0.07566;
+    PinnableSlice pinnable_val;
+    ReadOptions options(FLAGS_verify_checksum, true);
+
+    GenerateTwoTermExpKeys gen_exp;
+    gen_exp.InitiateExp(reads_, a, b, c, d);
+    int64_t real_reads = gen_exp.access_num_;
+
+    Duration duration(FLAGS_duration, real_reads);
+    while (!duration.Done(1)) {
+      DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
+      int64_t key_rand = thread->rand.Next() % real_reads;
+      int64_t exp_rand = gen_exp.DirectKeyID(key_rand);
+      GenerateKeyFromInt(exp_rand, gen_exp.key_num_, &key);
+      read++;
+      Status s;
+      if (FLAGS_num_column_families > 1) {
+        s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(exp_rand), key,
+                                 &pinnable_val);
+      } else {
+        pinnable_val.Reset();
+        s = db_with_cfh->db->Get(options,
+                                 db_with_cfh->db->DefaultColumnFamily(), key,
+                                 &pinnable_val);
+      }
+      if (s.ok()) {
+        found++;
+        bytes += key.size() + pinnable_val.size();
+      } else if (!s.IsNotFound()) {
+        fprintf(stderr, "Get returned an error: %s\n", s.ToString().c_str());
+        abort();
+      }
+
+      if (thread->shared->read_rate_limiter.get() != nullptr &&
+          read % 256 == 255) {
+        thread->shared->read_rate_limiter->Request(
+            256, Env::IO_HIGH, nullptr /* stats */, RateLimiter::OpType::kRead);
+      }
+
+      thread->stats.FinishedOps(db_with_cfh, db_with_cfh->db, 1, kRead);
+    }
+
+    char msg[100];
+    snprintf(msg, sizeof(msg), "(%" PRIu64 " of %" PRIu64 " found)\n",
+             found, read);
+
+    thread->stats.AddBytes(bytes);
+    thread->stats.AddMessage(msg);
+
+    if (FLAGS_perf_level > rocksdb::PerfLevel::kDisable) {
+      thread->stats.AddMessage(std::string("PERF_CONTEXT:\n") +
+                               get_perf_context()->ToString());
     }
   }
 
