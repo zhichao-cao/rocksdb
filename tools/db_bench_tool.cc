@@ -281,7 +281,30 @@ DEFINE_double(read_random_exp_range, 0.0,
               "num * exp(-r) where r is uniform number from 0 to this value. "
               "The larger the number is, the more skewed the reads are. "
               "Only used in readrandom and multireadrandom benchmarks.");
-
+DEFINE_double(myrocks_a, 0.0,
+              "The parameter 'a' of myrockssim "
+              "f(x)=a*exp(b*x)+c*exp(d*x)");
+DEFINE_double(myrocks_b, 0.0,
+              "The parameter 'a' of myrockssim "
+              "f(x)=a*exp(b*x)+c*exp(d*x)");
+DEFINE_double(myrocks_c, 0.0,
+              "The parameter 'a' of myrockssim "
+              "f(x)=a*exp(b*x)+c*exp(d*x)");
+DEFINE_double(myrocks_d, 0.0,
+              "The parameter 'a' of myrockssim "
+              "f(x)=a*exp(b*x)+c*exp(d*x)");
+DEFINE_int64(key_num, -1,
+              "The number of keys used by MyRocksSim "
+              "distribution of keys");
+DEFINE_bool(myrocks_key, true,
+              "Using the key access distribution to generate "
+              "the myrocks workload");
+DEFINE_bool(myrocks_access, false,
+              "Using the total access count and its distribution "
+              "to generate the myrocks workload");
+DEFINE_int64(group_num, 1,
+              "The number of groups in the key space, similar as "
+              "the tables in the MySql");
 DEFINE_bool(histogram, false, "Print histogram of operation timings");
 
 DEFINE_bool(enable_numa, false,
@@ -1287,27 +1310,93 @@ class GenerateTwoTermExpKeys {
 
   ~GenerateTwoTermExpKeys() { }
 
-  Status InitiateExp(const int64_t access, const double a, const double b, const double c, const double d) {
-    access_num_ = access;
+  // Using the number of keys to initiate the distribution
+  Status InitiateExpKey(const int64_t keys, const double a, const double b, const double c, const double d) {
+    key_num_ = keys;
     a_ = a;
     b_ = b;
     c_ = c;
     d_ = d;
     initiated_ = true;
-    double exp_ran;
+    double exp_ran, exp_val;
     int64_t cur_access = 0;
     int64_t cur_keys = 0;
 
-    for(int64_t x = 1; x <= access; x++) {
-      double exp_val = (a_ * std::exp(b_ * x) + c_ * std::exp(d_ * x)) * access * 0.9;
+    for(int64_t x = 1; x <= keys; x++) {
+      /*
+      if(x == 1) {
+        exp_val = 0.28 * keys;
+      } else if(x == 2) {
+        exp_val = 0.27 * keys;
+      } else if (x == 3) {
+        exp_val = 0.20 * keys;
+      } else {
+        exp_val = (a_ * std::exp(b_ * x) + c_ * std::exp(d_ * x)) * keys * 0.25;
+      }
+      */
+      exp_val = (a_ * std::exp(b_ * x) + c_ * std::exp(d_ * x)) * keys;
       if (exp_val < 1.0) {
         //exp_ran is the number of keys has access count 'x'
         exp_ran = 1.0;
       } else {
         exp_ran = std::floor(exp_val);
       }
+      int64_t access_num = static_cast<int64_t>(exp_ran);
+      if(access_num == 0) {
+        access_num = 1;
+      }
+      ExpKeyUnit tmp_unit;
+      tmp_unit.start_access = cur_access;
+      tmp_unit.start_key = cur_keys;
+      tmp_unit.access_count = x;
+      tmp_unit.num = access_num;
+      access_set_.push_back(tmp_unit);
 
-      int64_t access_num = static_cast<int64_t>(exp_ran/x);
+      cur_access += tmp_unit.access_count * tmp_unit.num;
+      cur_keys += tmp_unit.num;
+      std::cout<<keys<<" "<<cur_access<<" "<<cur_keys<<" "<<x<<"\n";
+      if (cur_keys >= keys || cur_access > keys * 8) {
+        break;
+      }
+    }
+    access_num_ = cur_access;
+    key_num_ = cur_keys;
+    return Status::OK();
+  }
+
+
+  Status InitiateExpAccess(const int64_t access, const double a, const double b, const double c, const double d) {
+    access_num_ = access;
+    a_ = a;
+    b_ = b;
+    c_ = c;
+    d_ = d;
+    initiated_ = true;
+    double exp_ran, exp_val;
+    int64_t cur_access = 0;
+    int64_t cur_keys = 0;
+
+    for(int64_t x = 1; x <= access; x++) {
+
+      if(x == 1) {
+        exp_val = 0.0875 * access;
+      } else if(x == 2) {
+        exp_val = 0.1717 * access;
+      } else if (x == 3) {
+        exp_val = 0.1934 * access;
+      } else {
+        exp_val = (a_ * std::exp(b_ * x) + c_ * std::exp(d_ * x)) * access * 0.5473;
+      }
+
+      //exp_val = (a_ * std::exp(b_ * x) + c_ * std::exp(d_ * x)) * access;
+      if (exp_val < 1.0) {
+        //exp_ran is the number of keys has access count 'x'
+        exp_ran = 1.0;
+      } else {
+        exp_ran = std::floor(exp_val);
+      }
+      std::cout<<exp_val<<" \n";
+      int64_t access_num = static_cast<int64_t>(exp_ran / x);
       if(access_num == 0) {
         access_num = 1;
       }
@@ -1326,7 +1415,6 @@ class GenerateTwoTermExpKeys {
     }
     access_num_ = cur_access;
     key_num_ = cur_keys;
-
     return Status::OK();
   }
 
@@ -1340,17 +1428,17 @@ class GenerateTwoTermExpKeys {
       return access_set_.back().start_key;
     }
 
-    int64_t start = 0, end = static_cast<int64_t>(access_set_.size()) - 1;
-    while (start < end) {
+    int64_t start = 0, end = static_cast<int64_t>(access_set_.size());
+    while (start + 1 < end) {
       int64_t mid = start + (end-start)/2;
-      if (ini_rand <= access_set_[mid].start_access) {
+      if (ini_rand < access_set_[mid].start_access) {
         end = mid;
       } else {
-        start = mid + 1;
+        start = mid;
       }
     }
     int64_t diff = ini_rand - access_set_[start].start_access;
-    int64_t offset = diff % access_set_[start].access_count;
+    int64_t offset = diff / access_set_[start].access_count;
     return (access_set_[start].start_key + offset);
   }
 
@@ -5673,12 +5761,17 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     int64_t bytes = 0;
     std::unique_ptr<const char[]> key_guard;
     Slice key = AllocateKey(&key_guard);
-    double a = 0.4758, b = -0.382, c = -0.0003245, d = -0.07566;
     PinnableSlice pinnable_val;
     ReadOptions options(FLAGS_verify_checksum, true);
-
+    if(FLAGS_key_num == -1) {
+      FLAGS_key_num = 10000;
+    }
     GenerateTwoTermExpKeys gen_exp;
-    gen_exp.InitiateExp(reads_, a, b, c, d);
+    if (FLAGS_myrocks_access) {
+      gen_exp.InitiateExpAccess(reads_, FLAGS_myrocks_a, FLAGS_myrocks_b, FLAGS_myrocks_c, FLAGS_myrocks_d);
+    } else if (FLAGS_myrocks_key) {
+      gen_exp.InitiateExpKey(FLAGS_key_num, FLAGS_myrocks_a, FLAGS_myrocks_b, FLAGS_myrocks_c, FLAGS_myrocks_d);
+    }
     int64_t real_reads = gen_exp.access_num_;
 
     Duration duration(FLAGS_duration, real_reads);
@@ -5686,7 +5779,10 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
       int64_t key_rand = thread->rand.Next() % real_reads;
       int64_t exp_rand = gen_exp.DirectKeyID(key_rand);
-      GenerateKeyFromInt(exp_rand, gen_exp.key_num_, &key);
+      int64_t group_size = gen_exp.key_num_ / FLAGS_group_num;
+      int64_t key_order = (exp_rand % FLAGS_group_num) * group_size + exp_rand / FLAGS_group_num;
+
+      GenerateKeyFromInt(key_order, real_reads, &key);
       read++;
       Status s;
       if (FLAGS_num_column_families > 1) {

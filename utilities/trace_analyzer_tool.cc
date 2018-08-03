@@ -1182,7 +1182,7 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     trace_u.type = type;
     trace_u.key = key;
     trace_u.value_size = value_size;
-    trace_u.ts = (ts - FLAGS_output_time_series) / 1000000;
+    trace_u.ts = (ts - FLAGS_output_time_series) / 1000;
     trace_u.cf_id = cf_id;
     ta_[type].stats[cf_id].time_series.push_back(trace_u);
   }
