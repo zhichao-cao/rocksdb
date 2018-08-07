@@ -282,29 +282,41 @@ DEFINE_double(read_random_exp_range, 0.0,
               "The larger the number is, the more skewed the reads are. "
               "Only used in readrandom and multireadrandom benchmarks.");
 DEFINE_double(myrocks_a, 0.0,
-              "The parameter 'a' of myrockssim "
+              "The parameter 'a' of myrockssim access distribution "
               "f(x)=a*exp(b*x)+c*exp(d*x)");
 DEFINE_double(myrocks_b, 0.0,
-              "The parameter 'a' of myrockssim "
+              "The parameter 'b' of myrockssim access distribution"
               "f(x)=a*exp(b*x)+c*exp(d*x)");
 DEFINE_double(myrocks_c, 0.0,
-              "The parameter 'a' of myrockssim "
+              "The parameter 'c' of myrockssim access distribution"
               "f(x)=a*exp(b*x)+c*exp(d*x)");
 DEFINE_double(myrocks_d, 0.0,
-              "The parameter 'a' of myrockssim "
+              "The parameter 'd' of myrockssim access distribution"
+              "f(x)=a*exp(b*x)+c*exp(d*x)");
+DEFINE_double(prefix_a, 0.0,
+              "The parameter 'a' of myrockssim prefix distribution "
+              "f(x)=a*exp(b*x)+c*exp(d*x)");
+DEFINE_double(prefix_b, 0.0,
+              "The parameter 'b' of myrockssim prefix distribution "
+              "f(x)=a*exp(b*x)+c*exp(d*x)");
+DEFINE_double(prefix_c, 0.0,
+              "The parameter 'c' of myrockssim prefix distribution"
+              "f(x)=a*exp(b*x)+c*exp(d*x)");
+DEFINE_double(prefix_d, 0.0,
+              "The parameter 'd' of myrockssim prefix distribution"
               "f(x)=a*exp(b*x)+c*exp(d*x)");
 DEFINE_int64(key_num, -1,
-              "The number of keys used by MyRocksSim "
-              "distribution of keys");
+             "The number of keys used by MyRocksSim "
+             "distribution of keys");
 DEFINE_bool(myrocks_key, true,
-              "Using the key access distribution to generate "
-              "the myrocks workload");
+            "Using the key access distribution to generate "
+            "the myrocks workload");
 DEFINE_bool(myrocks_access, false,
-              "Using the total access count and its distribution "
-              "to generate the myrocks workload");
+            "Using the total access count and its distribution "
+            "to generate the myrocks workload");
 DEFINE_int64(group_num, 1,
-              "The number of groups in the key space, similar as "
-              "the tables in the MySql");
+             "The number of groups in the key space, similar as "
+             "the tables in the MySql");
 DEFINE_bool(histogram, false, "Print histogram of operation timings");
 
 DEFINE_bool(enable_numa, false,
@@ -1274,11 +1286,13 @@ struct ExpKeyUnit {
   int64_t num;
 };
 
-struct ExpKeyUnitCmp {
-  bool operator() (const ExpKeyUnit& a, const int64_t& b) const {
-    return a.start_access > b;
-  }
+struct PrefixUnit {
+  int64_t prefix_start;
+  int64_t prefix_access;
+  int64_t prefix_keys;
+  std::vector<ExpKeyUnit> access_set;
 };
+
 
 // Generate the keys according to the two term expe fit
 // given the probability model, you can transfer the random
@@ -1296,6 +1310,7 @@ class GenerateTwoTermExpKeys {
   int64_t group_num_;
   bool initiated_;
   std::vector<ExpKeyUnit> access_set_;
+  std::vector<PrefixUnit> prefix_set_;
 
   GenerateTwoTermExpKeys() {
     access_num_ = FLAGS_num;
@@ -1311,7 +1326,8 @@ class GenerateTwoTermExpKeys {
   ~GenerateTwoTermExpKeys() { }
 
   // Using the number of keys to initiate the distribution
-  Status InitiateExpKey(const int64_t keys, const double a, const double b, const double c, const double d) {
+  Status InitiateExpKey(const int64_t keys, const double a, const double b,
+                        const double c, const double d) {
     key_num_ = keys;
     a_ = a;
     b_ = b;
@@ -1322,7 +1338,7 @@ class GenerateTwoTermExpKeys {
     int64_t cur_access = 0;
     int64_t cur_keys = 0;
 
-    for(int64_t x = 1; x <= keys; x++) {
+    for (int64_t x = 1; x <= keys; x++) {
       /*
       if(x == 1) {
         exp_val = 0.28 * keys;
@@ -1354,7 +1370,8 @@ class GenerateTwoTermExpKeys {
 
       cur_access += tmp_unit.access_count * tmp_unit.num;
       cur_keys += tmp_unit.num;
-      std::cout<<keys<<" "<<cur_access<<" "<<cur_keys<<" "<<x<<"\n";
+      std::cout << keys << " " << cur_access << " " << cur_keys << " " << x
+                << "\n";
       if (cur_keys >= keys || cur_access > keys * 8) {
         break;
       }
@@ -1364,63 +1381,132 @@ class GenerateTwoTermExpKeys {
     return Status::OK();
   }
 
-
-  Status InitiateExpAccess(const int64_t access, const double a, const double b, const double c, const double d) {
-    access_num_ = access;
+  Status InitiateExpAccess(const int64_t access, const double a, const double b,
+                           const double c, const double d,
+                           const double prefix_a, const double prefix_b,
+                           const double prefix_c, const double prefix_d) {
+    access_num_ = 0;
+    key_num_ = 0;
     a_ = a;
     b_ = b;
     c_ = c;
     d_ = d;
     initiated_ = true;
-    double exp_ran, exp_val;
-    int64_t cur_access = 0;
-    int64_t cur_keys = 0;
+    int64_t prefix_size = access / FLAGS_group_num;
+    int64_t prefix_total_access;
+    int64_t prefix_start = 0;
 
-    for(int64_t x = 1; x <= access; x++) {
-
-      if(x == 1) {
-        exp_val = 0.0875 * access;
-      } else if(x == 2) {
-        exp_val = 0.1717 * access;
-      } else if (x == 3) {
-        exp_val = 0.1934 * access;
+    for (int64_t i = 1; i <= FLAGS_group_num; i++) {
+      double prefix_total = (prefix_a * std::exp(prefix_b * i) +
+                             prefix_c * std::exp(prefix_d * i)) *
+                            access;
+      double prefix_ave = prefix_total / prefix_size;
+      if (prefix_total < 1.0) {
+        prefix_total_access = 1;
       } else {
-        exp_val = (a_ * std::exp(b_ * x) + c_ * std::exp(d_ * x)) * access * 0.5473;
+        prefix_total_access = static_cast<int64_t>(std::floor(prefix_total));
       }
 
-      //exp_val = (a_ * std::exp(b_ * x) + c_ * std::exp(d_ * x)) * access;
-      if (exp_val < 1.0) {
-        //exp_ran is the number of keys has access count 'x'
-        exp_ran = 1.0;
+      PrefixUnit p_unit;
+      p_unit.prefix_start = prefix_start;
+      p_unit.prefix_access = prefix_total_access;
+      p_unit.prefix_keys = prefix_size;
+
+      int64_t cur_access = 0;
+      int64_t cur_keys = 0;
+      int64_t access_num;
+      double exp_val;
+
+      for (int64_t x = 1; x <= prefix_size; x++) {
+        if (x > 3) {
+          exp_val =
+              (a * std::exp(b * x) + c * std::exp(d * x)) * p_unit.prefix_keys * prefix_ave;
+        } else {
+          exp_val = (a * std::exp(b * x) + c * std::exp(d * x)) * p_unit.prefix_keys;
+        }
+
+        if (exp_val < 1.0) {
+          access_num = 1;
+        } else {
+          access_num = static_cast<int64_t>(std::floor(exp_val));
+        }
+        ExpKeyUnit tmp_unit;
+        tmp_unit.start_access = cur_access;
+        tmp_unit.start_key = cur_keys;
+        tmp_unit.access_count = x;
+        tmp_unit.num = access_num;
+        p_unit.access_set.push_back(tmp_unit);
+
+        cur_access += tmp_unit.access_count * tmp_unit.num;
+        cur_keys += tmp_unit.num;
+        if (cur_keys >= prefix_size * 2 || cur_access > prefix_total_access * 3) {
+          break;
+        }
+      }
+      p_unit.prefix_access = cur_access;
+      p_unit.prefix_keys = cur_keys;
+      access_num_ += p_unit.prefix_access;
+      key_num_ += p_unit.prefix_keys;
+      prefix_set_.push_back(p_unit);
+    }
+
+    // shuffle the prefix and recalculate the start;
+    std::random_shuffle(prefix_set_.begin(), prefix_set_.end());
+    int64_t offset = 0;
+    for (auto& p_unit : prefix_set_) {
+      p_unit.prefix_start = offset;
+      offset += p_unit.prefix_access;
+    }
+
+    return Status::OK();
+  }
+
+  // If using the prefix, transfer the access id to key it
+  int64_t PrefixGetKeyID(const int64_t& ini_rand) {
+    if (!initiated_ || prefix_set_.size() == 0 || ini_rand >= access_num_) {
+      return (ini_rand % key_num_);
+    }
+
+    int64_t start = 0, end = static_cast<int64_t>(prefix_set_.size());
+    while (start + 1 < end) {
+      int64_t mid = start + (end - start) / 2;
+      if (ini_rand < prefix_set_[mid].prefix_start) {
+        end = mid;
       } else {
-        exp_ran = std::floor(exp_val);
-      }
-      std::cout<<exp_val<<" \n";
-      int64_t access_num = static_cast<int64_t>(exp_ran / x);
-      if(access_num == 0) {
-        access_num = 1;
-      }
-      ExpKeyUnit tmp_unit;
-      tmp_unit.start_access = cur_access;
-      tmp_unit.start_key = cur_keys;
-      tmp_unit.access_count = x;
-      tmp_unit.num = access_num;
-      access_set_.push_back(tmp_unit);
-
-      cur_access += tmp_unit.access_count * tmp_unit.num;
-      cur_keys += tmp_unit.num;
-      if (cur_access >= access) {
-        break;
+        start = mid;
       }
     }
-    access_num_ = cur_access;
-    key_num_ = cur_keys;
-    return Status::OK();
+
+    int64_t prefix_id = start;
+    int64_t prefix_offset = ini_rand - prefix_set_[prefix_id].prefix_start;
+    start = 0;
+    end = static_cast<int64_t>(prefix_set_[prefix_id].access_set.size());
+    while (start + 1 < end) {
+      int64_t mid = start + (end - start) / 2;
+      if (prefix_offset < prefix_set_[prefix_id].access_set[mid].start_access) {
+        end = mid;
+      } else {
+        start = mid;
+      }
+    }
+    int64_t diff =
+        prefix_offset - prefix_set_[prefix_id].access_set[start].start_access;
+    int64_t offset =
+        diff / prefix_set_[prefix_id].access_set[start].access_count;
+    int64_t key_offset =
+        prefix_set_[prefix_id].access_set[start].start_key + offset;
+    std::srand(key_offset);
+    int64_t ret =
+        static_cast<int64_t>(std::rand()) % prefix_set_[prefix_id].prefix_keys;
+    return (prefix_set_[prefix_id].prefix_start + ret);
   }
 
   // Make sure that ini_rand is [0,access_num_);
   int64_t DirectKeyID(const int64_t& ini_rand) {
-    if(!initiated_ || access_set_.size() == 0) {
+    uint64_t a = 1103515245;
+    uint64_t b = 12345;
+    if (!initiated_ || access_set_.size() == 0 ||
+        (port::kMaxUint64 - b) / a < static_cast<uint64_t>(ini_rand)) {
       return (ini_rand % key_num_);
     }
 
@@ -1439,7 +1525,12 @@ class GenerateTwoTermExpKeys {
     }
     int64_t diff = ini_rand - access_set_[start].start_access;
     int64_t offset = diff / access_set_[start].access_count;
-    return (access_set_[start].start_key + offset);
+    int64_t key_id = access_set_[start].start_key + offset;
+    /*
+    std::srand(key_id);
+    int64_t ret = static_cast<int64_t>(std::rand()) % key_num_;
+    */
+    return key_id;
   }
 
 };
@@ -5763,14 +5854,18 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     Slice key = AllocateKey(&key_guard);
     PinnableSlice pinnable_val;
     ReadOptions options(FLAGS_verify_checksum, true);
-    if(FLAGS_key_num == -1) {
+    if (FLAGS_key_num == -1) {
       FLAGS_key_num = 10000;
     }
     GenerateTwoTermExpKeys gen_exp;
     if (FLAGS_myrocks_access) {
-      gen_exp.InitiateExpAccess(reads_, FLAGS_myrocks_a, FLAGS_myrocks_b, FLAGS_myrocks_c, FLAGS_myrocks_d);
+      gen_exp.InitiateExpAccess(reads_, FLAGS_myrocks_a, FLAGS_myrocks_b,
+                                FLAGS_myrocks_c, FLAGS_myrocks_d,
+                                FLAGS_prefix_a, FLAGS_prefix_b, FLAGS_prefix_c,
+                                FLAGS_prefix_d);
     } else if (FLAGS_myrocks_key) {
-      gen_exp.InitiateExpKey(FLAGS_key_num, FLAGS_myrocks_a, FLAGS_myrocks_b, FLAGS_myrocks_c, FLAGS_myrocks_d);
+      gen_exp.InitiateExpKey(FLAGS_key_num, FLAGS_myrocks_a, FLAGS_myrocks_b,
+                             FLAGS_myrocks_c, FLAGS_myrocks_d);
     }
     int64_t real_reads = gen_exp.access_num_;
 
@@ -5778,15 +5873,13 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     while (!duration.Done(1)) {
       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
       int64_t key_rand = thread->rand.Next() % real_reads;
-      int64_t exp_rand = gen_exp.DirectKeyID(key_rand);
-      int64_t group_size = gen_exp.key_num_ / FLAGS_group_num;
-      int64_t key_order = (exp_rand % FLAGS_group_num) * group_size + exp_rand / FLAGS_group_num;
+      int64_t key_pos = gen_exp.PrefixGetKeyID(key_rand);
 
-      GenerateKeyFromInt(key_order, real_reads, &key);
+      GenerateKeyFromInt(key_pos, real_reads, &key);
       read++;
       Status s;
       if (FLAGS_num_column_families > 1) {
-        s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(exp_rand), key,
+        s = db_with_cfh->db->Get(options, db_with_cfh->GetCfh(key_pos), key,
                                  &pinnable_val);
       } else {
         pinnable_val.Reset();
