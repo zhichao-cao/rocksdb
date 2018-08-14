@@ -441,7 +441,7 @@ Status TraceAnalyzer::StartProcessing() {
     fprintf(stderr, "Cannot read the header\n");
     return s;
   }
-  if (FLAGS_output_time_series == 0) {
+  if (FLAGS_output_time_series > 0) {
     FLAGS_output_time_series = header.ts;
   }
 

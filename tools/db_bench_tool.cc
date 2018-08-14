@@ -1338,18 +1338,7 @@ class GenerateTwoTermExpKeys {
     int64_t cur_access = 0;
     int64_t cur_keys = 0;
 
-    for (int64_t x = 1; x <= keys; x++) {
-      /*
-      if(x == 1) {
-        exp_val = 0.28 * keys;
-      } else if(x == 2) {
-        exp_val = 0.27 * keys;
-      } else if (x == 3) {
-        exp_val = 0.20 * keys;
-      } else {
-        exp_val = (a_ * std::exp(b_ * x) + c_ * std::exp(d_ * x)) * keys * 0.25;
-      }
-      */
+    for (int64_t x = 1; x < keys; x++) {
       exp_val = (a_ * std::exp(b_ * x) + c_ * std::exp(d_ * x)) * keys;
       if (exp_val < 1.0) {
         //exp_ran is the number of keys has access count 'x'
@@ -1372,7 +1361,7 @@ class GenerateTwoTermExpKeys {
       cur_keys += tmp_unit.num;
       std::cout << keys << " " << cur_access << " " << cur_keys << " " << x
                 << "\n";
-      if (cur_keys >= keys || cur_access > keys * 8) {
+      if (cur_keys >= keys || cur_access > keys * 10) {
         break;
       }
     }
@@ -1381,7 +1370,8 @@ class GenerateTwoTermExpKeys {
     return Status::OK();
   }
 
-  Status InitiateExpAccess(const int64_t access, const double a, const double b,
+  Status InitiateExpAccess(const int64_t access, const int64_t total_keys,
+                           const double a, const double b,
                            const double c, const double d,
                            const double prefix_a, const double prefix_b,
                            const double prefix_c, const double prefix_d) {
@@ -1392,7 +1382,7 @@ class GenerateTwoTermExpKeys {
     c_ = c;
     d_ = d;
     initiated_ = true;
-    int64_t prefix_size = access / FLAGS_group_num;
+    int64_t prefix_size = total_keys / FLAGS_group_num;
     int64_t prefix_total_access;
     int64_t prefix_start = 0;
 
@@ -1401,6 +1391,13 @@ class GenerateTwoTermExpKeys {
                              prefix_c * std::exp(prefix_d * i)) *
                             access;
       double prefix_ave = prefix_total / prefix_size;
+      int64_t prefix_ave_int;
+      std::cout<<prefix_ave_int<<"\n";
+      if (prefix_ave < 1.0) {
+        prefix_ave_int = 1;
+      } else {
+        prefix_ave_int = static_cast<int64_t>(std::floor(prefix_ave));
+      }
       if (prefix_total < 1.0) {
         prefix_total_access = 1;
       } else {
@@ -1418,17 +1415,19 @@ class GenerateTwoTermExpKeys {
       double exp_val;
 
       for (int64_t x = 1; x <= prefix_size; x++) {
-        if (x > 3) {
+        if (x == 1 && prefix_ave > 1.0 ) {
           exp_val =
-              (a * std::exp(b * x) + c * std::exp(d * x)) * p_unit.prefix_keys * prefix_ave;
+              (a * std::exp(b * x) + c * std::exp(d * x)) * prefix_total_access;
+        } else if (x > prefix_ave_int) {
+          exp_val = (a * std::exp(b * x) + c * std::exp(d * x)) * prefix_total_access;
         } else {
-          exp_val = (a * std::exp(b * x) + c * std::exp(d * x)) * p_unit.prefix_keys;
+          exp_val = (a * std::exp(b * x) + c * std::exp(d * x)) * prefix_total_access;
         }
 
         if (exp_val < 1.0) {
           access_num = 1;
         } else {
-          access_num = static_cast<int64_t>(std::floor(exp_val));
+          access_num = static_cast<int64_t>(std::floor(exp_val)) / x;
         }
         ExpKeyUnit tmp_unit;
         tmp_unit.start_access = cur_access;
@@ -1439,7 +1438,7 @@ class GenerateTwoTermExpKeys {
 
         cur_access += tmp_unit.access_count * tmp_unit.num;
         cur_keys += tmp_unit.num;
-        if (cur_keys >= prefix_size * 2 || cur_access > prefix_total_access * 3) {
+        if (cur_keys >= prefix_size || cur_access > prefix_total_access) {
           break;
         }
       }
@@ -1458,6 +1457,7 @@ class GenerateTwoTermExpKeys {
       offset += p_unit.prefix_access;
     }
 
+    std::cout<<access_num_ <<" "<<key_num_<<"\n";
     return Status::OK();
   }
 
@@ -5859,7 +5859,7 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     }
     GenerateTwoTermExpKeys gen_exp;
     if (FLAGS_myrocks_access) {
-      gen_exp.InitiateExpAccess(reads_, FLAGS_myrocks_a, FLAGS_myrocks_b,
+      gen_exp.InitiateExpAccess(reads_, num_, FLAGS_myrocks_a, FLAGS_myrocks_b,
                                 FLAGS_myrocks_c, FLAGS_myrocks_d,
                                 FLAGS_prefix_a, FLAGS_prefix_b, FLAGS_prefix_c,
                                 FLAGS_prefix_d);
@@ -5867,15 +5867,14 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       gen_exp.InitiateExpKey(FLAGS_key_num, FLAGS_myrocks_a, FLAGS_myrocks_b,
                              FLAGS_myrocks_c, FLAGS_myrocks_d);
     }
-    int64_t real_reads = gen_exp.access_num_;
 
-    Duration duration(FLAGS_duration, real_reads);
+    Duration duration(FLAGS_duration, reads_);
     while (!duration.Done(1)) {
       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
-      int64_t key_rand = thread->rand.Next() % real_reads;
+      int64_t key_rand = thread->rand.Next() % gen_exp.access_num_;
       int64_t key_pos = gen_exp.PrefixGetKeyID(key_rand);
 
-      GenerateKeyFromInt(key_pos, real_reads, &key);
+      GenerateKeyFromInt(key_pos, gen_exp.key_num_, &key);
       read++;
       Status s;
       if (FLAGS_num_column_families > 1) {
