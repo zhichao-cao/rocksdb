@@ -1450,11 +1450,19 @@ class GenerateTwoTermExpKeys {
     }
 
     // shuffle the prefix and recalculate the start;
-    std::random_shuffle(prefix_set_.begin(), prefix_set_.end());
+
+    for (int64_t i = 0; i < FLAGS_group_num; i++) {
+      int64_t pos = prefix_set_[i].prefix_access % FLAGS_group_num;
+      PrefixUnit tmp = prefix_set_[i];
+      prefix_set_[i] = prefix_set_[pos];
+      prefix_set_[pos] = tmp;
+    }
+
     int64_t offset = 0;
     for (auto& p_unit : prefix_set_) {
       p_unit.prefix_start = offset;
       offset += p_unit.prefix_access;
+      std::cout<<p_unit.prefix_access<<" "<<p_unit.prefix_keys<<"\n";
     }
 
     std::cout<<access_num_ <<" "<<key_num_<<"\n";
@@ -5859,7 +5867,7 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     }
     GenerateTwoTermExpKeys gen_exp;
     if (FLAGS_myrocks_access) {
-      gen_exp.InitiateExpAccess(reads_, num_, FLAGS_myrocks_a, FLAGS_myrocks_b,
+      gen_exp.InitiateExpAccess(reads_ * FLAGS_threads, num_, FLAGS_myrocks_a, FLAGS_myrocks_b,
                                 FLAGS_myrocks_c, FLAGS_myrocks_d,
                                 FLAGS_prefix_a, FLAGS_prefix_b, FLAGS_prefix_c,
                                 FLAGS_prefix_d);
@@ -5871,7 +5879,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     Duration duration(FLAGS_duration, reads_);
     while (!duration.Done(1)) {
       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
-      int64_t key_rand = thread->rand.Next() % gen_exp.access_num_;
+      //int64_t key_rand = thread->rand.Next() % gen_exp.access_num_;
+      int64_t key_rand = thread->rand.Uniform(static_cast<uint64_t>(gen_exp.access_num_));
       int64_t key_pos = gen_exp.PrefixGetKeyID(key_rand);
 
       GenerateKeyFromInt(key_pos, gen_exp.key_num_, &key);
