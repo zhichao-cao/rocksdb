@@ -77,22 +77,22 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     return Status::Corruption("Batch is nullptr!");
   }
 
-   if (tracer_.get() == nullptr) {
-    TraceOptions trace_opts;
-    std::string trace_filename = "/data/trace/trace." + std::to_string(env_->NowMicros());
-    std::unique_ptr<TraceWriter> trace_writer;
-    EnvOptions env_opts;
-    NewFileTraceWriter(env_, env_opts, trace_filename, &trace_writer);
-    StartTrace(trace_opts, std::move(trace_writer));
-  }
+  trace_mutex_.Lock();
+     if (tracer_.get() == nullptr) {
+      TraceOptions trace_opts;
+      std::string trace_filename = "/data/trace/trace." + std::to_string(env_->NowMicros());
+      std::unique_ptr<TraceWriter> trace_writer;
+      EnvOptions env_opts;
+      NewFileTraceWriter(env_, env_opts, trace_filename, &trace_writer);
+      StartTrace(trace_opts, std::move(trace_writer));
+    }
 
 
-  if (tracer_) {
-    InstrumentedMutexLock lock(&trace_mutex_);
     if (tracer_) {
       tracer_->Write(my_batch);
     }
-  }
+  trace_mutex_.Unlock();
+
   if (write_options.sync && write_options.disableWAL) {
     return Status::InvalidArgument("Sync writes has to enable WAL.");
   }
