@@ -1308,6 +1308,7 @@ class GenerateTwoTermExpKeys {
   int64_t access_num_;
   int64_t key_num_;
   int64_t group_num_;
+  int64_t input_key_num_;
   bool initiated_;
   std::vector<ExpKeyUnit> access_set_;
   std::vector<PrefixUnit> prefix_set_;
@@ -1382,6 +1383,7 @@ class GenerateTwoTermExpKeys {
     c_ = c;
     d_ = d;
     initiated_ = true;
+    input_key_num_ = total_keys;
     int64_t prefix_size = total_keys / FLAGS_group_num;
     int64_t prefix_total_access;
     int64_t prefix_start = 0;
@@ -1453,16 +1455,19 @@ class GenerateTwoTermExpKeys {
 
     for (int64_t i = 0; i < FLAGS_group_num; i++) {
       int64_t pos = prefix_set_[i].prefix_access % FLAGS_group_num;
+      std::swap(prefix_set_[i], prefix_set_[pos]);
+      /*
       PrefixUnit tmp = prefix_set_[i];
       prefix_set_[i] = prefix_set_[pos];
       prefix_set_[pos] = tmp;
+      */
     }
 
     int64_t offset = 0;
     for (auto& p_unit : prefix_set_) {
       p_unit.prefix_start = offset;
       offset += p_unit.prefix_access;
-      std::cout<<p_unit.prefix_access<<" "<<p_unit.prefix_keys<<"\n";
+      std::cout << p_unit.prefix_access << " " << p_unit.prefix_keys << "\n";
     }
 
     std::cout<<access_num_ <<" "<<key_num_<<"\n";
@@ -1503,10 +1508,15 @@ class GenerateTwoTermExpKeys {
         diff / prefix_set_[prefix_id].access_set[start].access_count;
     int64_t key_offset =
         prefix_set_[prefix_id].access_set[start].start_key + offset;
-    std::srand(key_offset);
-    int64_t ret =
-        static_cast<int64_t>(std::rand()) % prefix_set_[prefix_id].prefix_keys;
-    return (prefix_set_[prefix_id].prefix_start + ret);
+    Random64 rand(key_offset);
+    int64_t ori_key =
+        static_cast<int64_t>(rand.Next() % prefix_set_[prefix_id].prefix_keys) +
+        prefix_set_[prefix_id].prefix_start;
+    int64_t output_key;
+    double ratio =
+        static_cast<double>(input_key_num_) / static_cast<double>(key_num_);
+    output_key = static_cast<int64_t>(std::floor(ori_key * ratio));
+    return output_key;
   }
 
   // Make sure that ini_rand is [0,access_num_);
@@ -4642,10 +4652,21 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     int64_t read = 0;
     int64_t found = 0;
     int64_t bytes = 0;
+    bool use_special_workload = false;
+    GenerateTwoTermExpKeys gen_exp;
+
     ReadOptions options(FLAGS_verify_checksum, true);
     std::unique_ptr<const char[]> key_guard;
     Slice key = AllocateKey(&key_guard);
     PinnableSlice pinnable_val;
+
+    if (FLAGS_myrocks_a != 0.0) {
+      gen_exp.InitiateExpAccess(reads_ * FLAGS_threads, num_, FLAGS_myrocks_a,
+                                FLAGS_myrocks_b, FLAGS_myrocks_c,
+                                FLAGS_myrocks_d, FLAGS_prefix_a, FLAGS_prefix_b,
+                                FLAGS_prefix_c, FLAGS_prefix_d);
+      use_special_workload = true;
+    }
 
     Duration duration(FLAGS_duration, reads_);
     while (!duration.Done(1)) {
@@ -4653,8 +4674,15 @@ void VerifyDBFromDB(std::string& truth_db_name) {
       // We use same key_rand as seed for key and column family so that we can
       // deterministically find the cfh corresponding to a particular key, as it
       // is done in DoWrite method.
-      int64_t key_rand = GetRandomKey(&thread->rand);
-      GenerateKeyFromInt(key_rand, FLAGS_num, &key);
+      int64_t key_rand;
+      if (!use_special_workload) {
+        key_rand = GetRandomKey(&thread->rand);
+        GenerateKeyFromInt(key_rand, FLAGS_num, &key);
+      } else {
+        int64_t access_pos = thread->rand.Next() % gen_exp.access_num_;
+        key_rand = gen_exp.PrefixGetKeyID(access_pos);
+        GenerateKeyFromInt(key_rand, FLAGS_num, &key);
+      }
       read++;
       Status s;
       if (FLAGS_num_column_families > 1) {
@@ -5867,10 +5895,10 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     }
     GenerateTwoTermExpKeys gen_exp;
     if (FLAGS_myrocks_access) {
-      gen_exp.InitiateExpAccess(reads_ * FLAGS_threads, num_, FLAGS_myrocks_a, FLAGS_myrocks_b,
-                                FLAGS_myrocks_c, FLAGS_myrocks_d,
-                                FLAGS_prefix_a, FLAGS_prefix_b, FLAGS_prefix_c,
-                                FLAGS_prefix_d);
+      gen_exp.InitiateExpAccess(reads_ * FLAGS_threads, num_, FLAGS_myrocks_a,
+                                FLAGS_myrocks_b, FLAGS_myrocks_c,
+                                FLAGS_myrocks_d, FLAGS_prefix_a, FLAGS_prefix_b,
+                                FLAGS_prefix_c, FLAGS_prefix_d);
     } else if (FLAGS_myrocks_key) {
       gen_exp.InitiateExpKey(FLAGS_key_num, FLAGS_myrocks_a, FLAGS_myrocks_b,
                              FLAGS_myrocks_c, FLAGS_myrocks_d);
@@ -5879,8 +5907,9 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     Duration duration(FLAGS_duration, reads_);
     while (!duration.Done(1)) {
       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
-      //int64_t key_rand = thread->rand.Next() % gen_exp.access_num_;
-      int64_t key_rand = thread->rand.Uniform(static_cast<uint64_t>(gen_exp.access_num_));
+      // int64_t key_rand = thread->rand.Next() % gen_exp.access_num_;
+      int64_t key_rand =
+          thread->rand.Uniform(static_cast<uint64_t>(gen_exp.access_num_));
       int64_t key_pos = gen_exp.PrefixGetKeyID(key_rand);
 
       GenerateKeyFromInt(key_pos, gen_exp.key_num_, &key);
