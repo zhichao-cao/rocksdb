@@ -60,6 +60,8 @@ struct StatsUnit {
   uint64_t access_count;
   uint64_t latest_ts;
   uint64_t succ_count;  // current only used to count Get if key found
+  uint32_t max_window_count;
+  uint32_t cur_window_count;
   std::vector<TypeCorre> v_corre;
 };
 
@@ -89,6 +91,7 @@ class AnalyzerOptions {
   bool special;
   uint64_t output_ignore_count;
   uint64_t start_time;
+  uint64_t time_window;  // in second
   int value_interval;
   int top_k;
   int prefix_cut;
@@ -122,6 +125,7 @@ struct TraceStats {
   std::map<uint64_t, uint64_t> a_count_stats;
   std::map<uint64_t, uint64_t> a_key_size_stats;
   std::map<uint64_t, uint64_t> a_value_size_stats;
+  std::map<uint32_t, uint32_t> a_window_dist_stats;
   std::map<uint32_t, uint32_t> a_io_stats;
   std::map<uint32_t, std::map<std::string, uint32_t>> a_io_prefix_stats;
   std::priority_queue<std::pair<uint64_t, std::string>,
@@ -142,6 +146,7 @@ struct TraceStats {
       top_k_io_sec;
   std::list<TraceUnit> time_serial;
   std::vector<std::pair<uint64_t, uint64_t>> corre_output;
+  std::queue<std::pair<std::string, uint64_t>> locality_window;
 
   FILE* time_serial_f;
   FILE* a_key_f;
@@ -150,6 +155,7 @@ struct TraceStats {
   FILE* a_value_size_f;
   FILE* a_io_f;
   FILE* a_top_io_prefix_f;
+  FILE* a_window_dist_f;
   FILE* w_key_f;
   FILE* w_prefix_cut_f;
 
@@ -234,6 +240,8 @@ class TraceAnalyzer {
   Status KeyStatsInsertion(const uint32_t& type, const uint32_t& cf_id,
                            const std::string& key, const size_t value_size,
                            const uint64_t ts);
+  Status UpdateLocalityWindow(TraceStats& stats, StatsUnit& unit,
+                              const std::string& key, const uint64_t& ts);
   Status StatsUnitCorreUpdate(StatsUnit& unit, const uint32_t& type,
                               const uint64_t& ts, const std::string& key);
   Status OpenStatsOutputFiles(const std::string& type, TraceStats& new_stats);

@@ -100,6 +100,7 @@ AnalyzerOptions::AnalyzerOptions()
   special = false;
   output_ignore_count = 0;
   start_time = 0;
+  time_window = 0;
   value_interval = 8;
   top_k = 1;
   prefix_cut = 0;
@@ -455,6 +456,14 @@ Status TraceAnalyzer::MakeStatistics() {
         if (analyzer_opts_.output_correlation) {
           s = MakeStatisticCorrelation(i->second, it->second);
         }
+
+        if (analyzer_opts_.time_window > 0) {
+          if (i->second.a_window_dist_stats.find(it->second.max_window_count) == i->second.a_window_dist_stats.end()) {
+            i->second.a_window_dist_stats[it->second.max_window_count] = 1;
+          } else {
+            i->second.a_window_dist_stats[it->second.max_window_count]++;
+          }
+        }
       }
 
       // Output the prefix cut or the whole content of the accessed key space
@@ -473,6 +482,18 @@ Status TraceAnalyzer::MakeStatistics() {
           ret = fprintf(i->second.a_count_dist_f,
                         "access_count: %" PRIu64 " num: %" PRIu64 "\n",
                         it->first, it->second);
+          if (ret < 0) {
+            return Status::IOError("write file failed");
+          }
+        }
+      }
+
+      if (analyzer_opts_.time_window > 0 &&
+          i->second.a_window_dist_f != nullptr) {
+        for (auto& record:i->second.a_window_dist_stats) {
+          ret = fprintf(i->second.a_window_dist_f,
+                        "max_access_count_in_window: %u num: %u\n",
+                        record.first, record.second);
           if (ret < 0) {
             return Status::IOError("write file failed");
           }
@@ -545,9 +566,10 @@ Status TraceAnalyzer::MakeStatisticKeyStatsOrPrefix(TraceStats& stats) {
     stats.a_succ_count += it->second.succ_count;
     double succ_ratio =
         (static_cast<double>(it->second.succ_count)) / it->second.access_count;
-    ret = fprintf(stats.a_key_f, "%u %zu %" PRIu64 " %" PRIu64 " %f\n",
+    ret = fprintf(stats.a_key_f, "%u %zu %" PRIu64 " %" PRIu64 " %u %f\n",
                   it->second.cf_id, it->second.value_size, it->second.key_id,
-                  it->second.access_count, succ_ratio);
+                  it->second.access_count, it->second.max_window_count,
+                  succ_ratio);
     if (ret < 0) {
       return Status::IOError("write file failed");
     }
@@ -893,7 +915,10 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
   } else {
     unit.succ_count = 0;
   }
+  unit.max_window_count = 0;
+  unit.cur_window_count = 0;
   unit.v_corre.resize(analyzer_opts_.corre_list.size());
+
   for (int i = 0; i < (static_cast<int>(analyzer_opts_.corre_list.size())); i++) {
     unit.v_corre[i].count = 0;
     unit.v_corre[i].total_ts = 0;
@@ -927,6 +952,10 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     if (analyzer_opts_.output_correlation) {
       s = StatsUnitCorreUpdate(unit, type, ts, key);
     }
+    // insert the first pair to the locality window
+    if (analyzer_opts_.time_window > 0) {
+      UpdateLocalityWindow(new_stats, unit, key, ts);
+    }
     new_stats.a_key_stats[key] = unit;
     new_stats.a_value_size_stats[dist_value_size] = 1;
     new_stats.a_io_stats[time_in_sec] = 1;
@@ -945,6 +974,9 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     found_stats->second.a_value_size_sum += value_size;
     auto found_key = found_stats->second.a_key_stats.find(key);
     if (found_key == found_stats->second.a_key_stats.end()) {
+      if (analyzer_opts_.time_window > 0) {
+        UpdateLocalityWindow(found_stats->second, unit, key, ts);
+      }
       found_stats->second.a_key_stats[key] = unit;
     } else {
       found_key->second.access_count++;
@@ -953,6 +985,10 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
       }
       if (analyzer_opts_.output_correlation) {
         s = StatsUnitCorreUpdate(found_key->second, type, ts, key);
+      }
+      // Update the locality window
+      if (analyzer_opts_.time_window > 0) {
+        UpdateLocalityWindow(found_stats->second, found_key->second, key, ts);
       }
     }
 
@@ -1005,6 +1041,28 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     ta_[type].stats[cf_id].time_serial.push_back(trace_u);
   }
 
+  return Status::OK();
+}
+
+Status TraceAnalyzer::UpdateLocalityWindow(TraceStats& stats, StatsUnit& unit,
+                                           const std::string& key,
+                                           const uint64_t& ts) {
+  unit.cur_window_count++;
+  stats.locality_window.push(std::make_pair(key, ts));
+  while (!stats.locality_window.empty() &&
+         (ts - stats.locality_window.front().second) / 1000000 >
+             analyzer_opts_.time_window) {
+    auto found_key =
+        stats.a_key_stats.find(stats.locality_window.front().first);
+    if (found_key != stats.a_key_stats.end()) {
+      if (found_key->second.cur_window_count > 0) {
+        found_key->second.cur_window_count--;
+      }
+    }
+    stats.locality_window.pop();
+  }
+  unit.max_window_count =
+      std::max(unit.max_window_count, unit.cur_window_count);
   return Status::OK();
 }
 
@@ -1086,6 +1144,11 @@ Status TraceAnalyzer::OpenStatsOutputFiles(const std::string& type,
         CreateOutputFile(type, new_stats.cf_name, "io_stats.txt");
   }
 
+  if (analyzer_opts_.time_window > 0) {
+    new_stats.a_window_dist_f =
+        CreateOutputFile(type, new_stats.cf_name, "time_window_count_distribution.txt");
+  }
+
   return Status::OK();
 }
 
@@ -1145,6 +1208,9 @@ void TraceAnalyzer::CloseOutputFiles() {
       }
       if (i->second.w_prefix_cut_f != nullptr) {
         fclose(i->second.w_prefix_cut_f);
+      }
+      if (i->second.a_window_dist_f != nullptr) {
+        fclose(i->second.a_window_dist_f);
       }
     }
   }
@@ -1630,6 +1696,10 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
       std::string tmp = argv[i] + 21;
       analyzer_opts.start_time = std::stoull(tmp, &sz, 0);
       analyzer_opts.output_time_serial = true;
+    } else if (strncmp(argv[i], "--time_window=", 14) == 0) {
+      std::string::size_type sz = 0;
+      std::string tmp = argv[i] + 14;
+      analyzer_opts.time_window = std::stoull(tmp, &sz, 0);
     } else if (strncmp(argv[i], "--output_prefix_cut=", 20) == 0) {
       std::string tmp = argv[i] + 20;
       analyzer_opts.prefix_cut = std::stoi(tmp);
