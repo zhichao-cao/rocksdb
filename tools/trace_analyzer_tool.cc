@@ -1227,9 +1227,6 @@ void TraceAnalyzer::CloseOutputFiles() {
       if (i->second.w_prefix_cut_f != nullptr) {
         fclose(i->second.w_prefix_cut_f);
       }
-      if (i->second.a_window_dist_f != nullptr) {
-        fclose(i->second.a_window_dist_f);
-      }
     }
   }
   return;
@@ -1538,6 +1535,9 @@ void TraceAnalyzer::PrintGetStatistics() {
           FILE* tmp_file = fopen(file_name.c_str(), "w");
           if (tmp_file != nullptr) {
             for (auto& mp : stats.corre_distribution) {
+              if (mp.second.size()!= analyzer_opts_.corre_list.size()) {
+                continue;
+              }
               for (int corre = 0;
                    corre < static_cast<int>(analyzer_opts_.corre_list.size());
                    corre++) {
