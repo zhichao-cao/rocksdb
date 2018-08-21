@@ -91,8 +91,9 @@ class AnalyzerOptions {
   bool special;
   uint64_t output_ignore_count;
   uint64_t start_time;
-  uint64_t time_window;  // in second
-  int value_interval;
+  uint64_t time_window;           // in second
+  uint64_t interval_distribution;  // in microsecond
+      int value_interval;
   int top_k;
   int prefix_cut;
   std::string output_prefix;
@@ -147,6 +148,7 @@ struct TraceStats {
   std::list<TraceUnit> time_serial;
   std::vector<std::pair<uint64_t, uint64_t>> corre_output;
   std::queue<std::pair<std::string, uint64_t>> locality_window;
+  std::map<uint64_t, std::vector<uint64_t>> corre_distribution;
 
   FILE* time_serial_f;
   FILE* a_key_f;

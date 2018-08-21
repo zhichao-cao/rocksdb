@@ -101,6 +101,7 @@ AnalyzerOptions::AnalyzerOptions()
   output_ignore_count = 0;
   start_time = 0;
   time_window = 0;
+  interval_distribution = 0;
   value_interval = 8;
   top_k = 1;
   prefix_cut = 0;
@@ -458,7 +459,8 @@ Status TraceAnalyzer::MakeStatistics() {
         }
 
         if (analyzer_opts_.time_window > 0) {
-          if (i->second.a_window_dist_stats.find(it->second.max_window_count) == i->second.a_window_dist_stats.end()) {
+          if (i->second.a_window_dist_stats.find(it->second.max_window_count) ==
+              i->second.a_window_dist_stats.end()) {
             i->second.a_window_dist_stats[it->second.max_window_count] = 1;
           } else {
             i->second.a_window_dist_stats[it->second.max_window_count]++;
@@ -490,7 +492,7 @@ Status TraceAnalyzer::MakeStatistics() {
 
       if (analyzer_opts_.time_window > 0 &&
           i->second.a_window_dist_f != nullptr) {
-        for (auto& record:i->second.a_window_dist_stats) {
+        for (auto& record : i->second.a_window_dist_stats) {
           ret = fprintf(i->second.a_window_dist_f,
                         "max_access_count_in_window: %u num: %u\n",
                         record.first, record.second);
@@ -1090,6 +1092,22 @@ Status TraceAnalyzer::StatsUnitCorreUpdate(StatsUnit& unit,
     unit.v_corre[corre_id].count++;
     unit.v_corre[corre_id].total_ts += (ts -
         ta_[i].stats[unit.cf_id].a_key_stats[key].latest_ts);
+
+    // get the x after x interval distribution
+    if (analyzer_opts_.interval_distribution > 0) {
+      uint64_t interval =
+          (ts - ta_[i].stats[unit.cf_id].a_key_stats[key].latest_ts) /
+          analyzer_opts_.interval_distribution;
+      auto interval_found =
+          ta_[i].stats[unit.cf_id].corre_distribution.find(interval);
+      if (interval_found == ta_[i].stats[unit.cf_id].corre_distribution.end()) {
+        std::vector<uint64_t> tmp_v(unit.v_corre.size(), 0);
+        tmp_v[corre_id]++;
+        ta_[i].stats[unit.cf_id].corre_distribution[interval] = tmp_v;
+      } else {
+        interval_found->second[corre_id]++;
+      }
+    }
   }
 
   unit.latest_ts = ts;
@@ -1145,8 +1163,8 @@ Status TraceAnalyzer::OpenStatsOutputFiles(const std::string& type,
   }
 
   if (analyzer_opts_.time_window > 0) {
-    new_stats.a_window_dist_f =
-        CreateOutputFile(type, new_stats.cf_name, "time_window_count_distribution.txt");
+    new_stats.a_window_dist_f = CreateOutputFile(
+        type, new_stats.cf_name, "time_window_count_distribution.txt");
   }
 
   return Status::OK();
@@ -1512,6 +1530,24 @@ void TraceAnalyzer::PrintGetStatistics() {
           printf(" total numbers: %" PRIu64 " average time: %f(ms)\n",
                  stats.corre_output[corre].first, corre_ave);
         }
+
+        if (analyzer_opts_.interval_distribution > 0) {
+          std::string file_name = output_path_ + "/" +
+                                  analyzer_opts_.output_prefix + "-" +
+                                  "correlation_interval.txt";
+          FILE* tmp_file = fopen(file_name.c_str(), "w");
+          if (tmp_file != nullptr) {
+            for (auto& mp : stats.corre_distribution) {
+              for (int corre = 0;
+                   corre < static_cast<int>(analyzer_opts_.corre_list.size());
+                   corre++) {
+                fprintf(tmp_file, "%" PRIu64 " ", mp.second[corre]);
+              }
+              fprintf(tmp_file, "\n");
+            }
+            fclose(tmp_file);
+          }
+        }
       }
     }
     printf("*********************************************************\n");
@@ -1700,6 +1736,10 @@ int TraceAnalyzerTool::Run(int argc, char** argv) {
       std::string::size_type sz = 0;
       std::string tmp = argv[i] + 14;
       analyzer_opts.time_window = std::stoull(tmp, &sz, 0);
+    } else if (strncmp(argv[i], "--interval_distribution=", 24) == 0) {
+      std::string::size_type sz = 0;
+      std::string tmp = argv[i] + 24;
+      analyzer_opts.interval_distribution = std::stoull(tmp, &sz, 0);
     } else if (strncmp(argv[i], "--output_prefix_cut=", 20) == 0) {
       std::string tmp = argv[i] + 20;
       analyzer_opts.prefix_cut = std::stoi(tmp);
