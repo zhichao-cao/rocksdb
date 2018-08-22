@@ -1481,7 +1481,7 @@ class GenerateTwoTermExpKeys {
                                  const double b, const double c, const double d,
                                  const double prefix_a, const double prefix_b,
                                  const double prefix_c, const double prefix_d) {
-    int64_t amplify = 1;
+    int64_t amplify = 0;
     int64_t prefix_start = 0;
     int64_t prefix_size = total_keys / FLAGS_group_num;
     prefix_size_ = prefix_size;
@@ -1489,14 +1489,18 @@ class GenerateTwoTermExpKeys {
     for (int64_t pfx = FLAGS_group_num; pfx >= 1; pfx--) {
       double prefix_p = prefix_a * std::exp(prefix_b * pfx) +
                         prefix_c * std::exp(prefix_d * pfx);
-      if (pfx == FLAGS_group_num) {
+      if (amplify == 0 && prefix_p > 0) {
         amplify = static_cast<int64_t>(std::floor(1 / prefix_p)) + 1;
       }
 
       PrefixUnit p_unit;
       p_unit.prefix_start = prefix_start;
-      p_unit.prefix_access =
-          static_cast<int64_t>(std::floor(amplify * prefix_p));
+      if (0 >= prefix_p) {
+          p_unit.prefix_access = 0;
+      } else {
+        p_unit.prefix_access =
+            static_cast<int64_t>(std::floor(amplify * prefix_p));
+      }
       p_unit.prefix_keys = prefix_size;
       prefix_set_.push_back(p_unit);
       prefix_start += p_unit.prefix_access;
@@ -1518,18 +1522,22 @@ class GenerateTwoTermExpKeys {
       std::cout << p_unit.prefix_access << " " << p_unit.prefix_keys << "\n";
     }
 
-    amplify = 1;
+    amplify = 0;
     int64_t key_access = 0;
     for (int64_t key = prefix_size; key >= 1; key--) {
       double exp_key = a * std::exp(b * key) + c * std::exp(d * key);
-      if (key == prefix_size) {
+      if (amplify == 0 && exp_key > 0) {
         amplify = static_cast<int64_t>(std::floor(1 / exp_key)) + 1;
       }
 
       ExpKeyUnit tmp_unit;
       tmp_unit.start_access = key_access;
-      tmp_unit.access_count =
-          static_cast<int64_t>(std::floor(amplify * exp_key));
+      if (0 >= exp_key) {
+        tmp_unit.access_count = 0;
+      } else {
+        tmp_unit.access_count =
+            static_cast<int64_t>(std::floor(amplify * exp_key));
+      }
       access_set_.push_back(tmp_unit);
       key_access += tmp_unit.access_count;
     }
@@ -1574,7 +1582,8 @@ class GenerateTwoTermExpKeys {
         start = mid;
       }
     }
-    return prefix_size_ * prefix_id + start;
+    Random64 rand_key(start);
+    return prefix_size_ * prefix_id + rand_key.Next() % prefix_size_;
   }
 
   // If using the prefix, transfer the access id to key it
