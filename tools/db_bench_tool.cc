@@ -1309,6 +1309,9 @@ class GenerateTwoTermExpKeys {
   int64_t key_num_;
   int64_t group_num_;
   int64_t input_key_num_;
+  int64_t prefix_rand_max_;
+  int64_t key_rand_max_;
+  int64_t prefix_size_;
   bool initiated_;
   std::vector<ExpKeyUnit> access_set_;
   std::vector<PrefixUnit> prefix_set_;
@@ -1472,6 +1475,106 @@ class GenerateTwoTermExpKeys {
 
     std::cout<<access_num_ <<" "<<key_num_<<"\n";
     return Status::OK();
+  }
+
+  Status InitiateExpDistribution(const int64_t total_keys, const double a,
+                                 const double b, const double c, const double d,
+                                 const double prefix_a, const double prefix_b,
+                                 const double prefix_c, const double prefix_d) {
+    int64_t amplify = 1;
+    int64_t prefix_start = 0;
+    int64_t prefix_size = total_keys / FLAGS_group_num;
+    prefix_size_ = prefix_size;
+
+    for (int64_t pfx = FLAGS_group_num; pfx >= 1; pfx--) {
+      double prefix_p = prefix_a * std::exp(prefix_b * pfx) +
+                        prefix_c * std::exp(prefix_d * pfx);
+      if (pfx == FLAGS_group_num) {
+        amplify = static_cast<int64_t>(std::floor(1 / prefix_p)) + 1;
+      }
+
+      PrefixUnit p_unit;
+      p_unit.prefix_start = prefix_start;
+      p_unit.prefix_access =
+          static_cast<int64_t>(std::floor(amplify * prefix_p));
+      p_unit.prefix_keys = prefix_size;
+      prefix_set_.push_back(p_unit);
+      prefix_start += p_unit.prefix_access;
+    }
+    prefix_rand_max_ = prefix_start;
+
+    // Shuffle the prefix
+    Random64 rand_loca(prefix_rand_max_);
+    for (int64_t i = 0; i < FLAGS_group_num; i++) {
+      int64_t pos = rand_loca.Next() % FLAGS_group_num;
+      std::swap(prefix_set_[i], prefix_set_[pos]);
+    }
+
+    // Recalculate the prefix start postion
+    int64_t offset = 0;
+    for (auto& p_unit : prefix_set_) {
+      p_unit.prefix_start = offset;
+      offset += p_unit.prefix_access;
+      std::cout << p_unit.prefix_access << " " << p_unit.prefix_keys << "\n";
+    }
+
+    amplify = 1;
+    int64_t key_access = 0;
+    for (int64_t key = prefix_size; key >= 1; key--) {
+      double exp_key = a * std::exp(b * key) + c * std::exp(d * key);
+      if (key == prefix_size) {
+        amplify = static_cast<int64_t>(std::floor(1 / exp_key)) + 1;
+      }
+
+      ExpKeyUnit tmp_unit;
+      tmp_unit.start_access = key_access;
+      tmp_unit.access_count =
+          static_cast<int64_t>(std::floor(amplify * exp_key));
+      access_set_.push_back(tmp_unit);
+      key_access += tmp_unit.access_count;
+    }
+    key_rand_max_ = key_access;
+
+    Random64 rand_pos(key_rand_max_);
+    for (int64_t i = 0; i < prefix_size; i++) {
+      int64_t pos = rand_pos.Next() % prefix_size;
+      std::swap(access_set_[i], access_set_[pos]);
+    }
+
+    offset = 0;
+    for (auto& k_unit : access_set_) {
+      k_unit.start_access = offset;
+      offset += k_unit.access_count;
+    }
+
+    return Status::OK();
+  }
+
+  int64_t DistGetKeyID(const int64_t& ini_rand) {
+    int64_t prefix_rand = ini_rand % prefix_rand_max_;
+    int64_t start = 0, end = static_cast<int64_t>(prefix_set_.size());
+    while (start + 1 < end) {
+      int64_t mid = start + (end - start) / 2;
+      if (prefix_rand < prefix_set_[mid].prefix_start) {
+        end = mid;
+      } else {
+        start = mid;
+      }
+    }
+    int64_t prefix_id = start;
+
+    int64_t key_rand = ini_rand % key_rand_max_;
+    start = 0;
+    end = static_cast<int64_t>(access_set_.size());
+    while (start + 1 < end) {
+      int64_t mid = start + (end - start) / 2;
+      if (key_rand < access_set_[mid].start_access) {
+        end = mid;
+      } else {
+        start = mid;
+      }
+    }
+    return prefix_size_ * prefix_id + start;
   }
 
   // If using the prefix, transfer the access id to key it
@@ -4661,10 +4764,16 @@ void VerifyDBFromDB(std::string& truth_db_name) {
     PinnableSlice pinnable_val;
 
     if (FLAGS_myrocks_a != 0.0) {
+      /*
       gen_exp.InitiateExpAccess(reads_ * FLAGS_threads, num_, FLAGS_myrocks_a,
                                 FLAGS_myrocks_b, FLAGS_myrocks_c,
                                 FLAGS_myrocks_d, FLAGS_prefix_a, FLAGS_prefix_b,
                                 FLAGS_prefix_c, FLAGS_prefix_d);
+      */
+      gen_exp.InitiateExpDistribution(num_, FLAGS_myrocks_a, FLAGS_myrocks_b,
+                                      FLAGS_myrocks_c, FLAGS_myrocks_d,
+                                      FLAGS_prefix_a, FLAGS_prefix_b,
+                                      FLAGS_prefix_c, FLAGS_prefix_d);
       use_special_workload = true;
     }
 
@@ -4679,8 +4788,8 @@ void VerifyDBFromDB(std::string& truth_db_name) {
         key_rand = GetRandomKey(&thread->rand);
         GenerateKeyFromInt(key_rand, FLAGS_num, &key);
       } else {
-        int64_t access_pos = thread->rand.Next() % gen_exp.access_num_;
-        key_rand = gen_exp.PrefixGetKeyID(access_pos);
+        int64_t access_pos = thread->rand.Next() % gen_exp.key_rand_max_;
+        key_rand = gen_exp.DistGetKeyID(access_pos);
         GenerateKeyFromInt(key_rand, FLAGS_num, &key);
       }
       read++;
