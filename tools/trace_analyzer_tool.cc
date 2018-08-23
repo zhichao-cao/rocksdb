@@ -1531,6 +1531,7 @@ void TraceAnalyzer::PrintGetStatistics() {
         if (analyzer_opts_.interval_distribution > 0) {
           std::string file_name = output_path_ + "/" +
                                   analyzer_opts_.output_prefix + "-" +
+                                  stats.cf_name + "-" +
                                   "correlation_interval.txt";
           FILE* tmp_file = fopen(file_name.c_str(), "w");
           if (tmp_file != nullptr) {
@@ -1538,6 +1539,7 @@ void TraceAnalyzer::PrintGetStatistics() {
               if (mp.second.size()!= analyzer_opts_.corre_list.size()) {
                 continue;
               }
+              fprintf(tmp_file, "%" PRIu64 " ", mp.first);
               for (int corre = 0;
                    corre < static_cast<int>(analyzer_opts_.corre_list.size());
                    corre++) {
