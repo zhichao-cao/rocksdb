@@ -1223,7 +1223,7 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
   if(tracer_.get() == nullptr) {
     InstrumentedMutexLock lock(&trace_mutex_);
     if(tracer_.get() == nullptr) {
-      std::string trace_filename = "/home/zhichao/trace/trace." + std::to_string(env_->NowMicros());
+      std::string trace_filename = "/data/trace/trace." + std::to_string(env_->NowMicros());
       EnvOptions env_opts;
       std::unique_ptr<TraceWriter> trace_writer;
       NewFileTraceWriter(env_, env_opts, trace_filename, &trace_writer);
