@@ -46,6 +46,7 @@
 #include "table/scoped_arena_iterator.h"
 #include "util/compression.h"
 #include "util/filename.h"
+#include "util/mock_time_env.h"
 #include "util/mutexlock.h"
 
 #include "util/string_util.h"
@@ -109,8 +110,6 @@ struct OptionsOverride {
   // These will be used only if filter_policy is set
   bool partition_filters = false;
   uint64_t metadata_block_size = 1024;
-  BlockBasedTableOptions::IndexType index_type =
-      BlockBasedTableOptions::IndexType::kBinarySearch;
 
   // Used as a bit mask of individual enums in which to skip an XF test point
   int skip_policy = 0;
@@ -317,6 +316,9 @@ class SpecialEnv : public EnvWrapper {
         }
       }
       uint64_t GetFileSize() override { return base_->GetFileSize(); }
+      Status Allocate(uint64_t offset, uint64_t len) override {
+        return base_->Allocate(offset, len);
+      }
 
      private:
       SpecialEnv* env_;
@@ -369,6 +371,9 @@ class SpecialEnv : public EnvWrapper {
       }
       bool IsSyncThreadSafe() const override {
         return env_->is_wal_sync_thread_safe_.load();
+      }
+      Status Allocate(uint64_t offset, uint64_t len) override {
+        return base_->Allocate(offset, len);
       }
 
      private:
@@ -569,44 +574,13 @@ class SpecialEnv : public EnvWrapper {
 
   std::atomic<int> delete_count_;
 
-  bool time_elapse_only_sleep_;
+  std::atomic<bool> time_elapse_only_sleep_;
 
   bool no_slowdown_;
 
   std::atomic<bool> is_wal_sync_thread_safe_{true};
 
-  std::atomic<size_t> compaction_readahead_size_;
-};
-
-class MockTimeEnv : public EnvWrapper {
- public:
-  explicit MockTimeEnv(Env* base) : EnvWrapper(base) {}
-
-  virtual Status GetCurrentTime(int64_t* time) override {
-    assert(time != nullptr);
-    assert(current_time_ <=
-           static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
-    *time = static_cast<int64_t>(current_time_);
-    return Status::OK();
-  }
-
-  virtual uint64_t NowMicros() override {
-    assert(current_time_ <= std::numeric_limits<uint64_t>::max() / 1000000);
-    return current_time_ * 1000000;
-  }
-
-  virtual uint64_t NowNanos() override {
-    assert(current_time_ <= std::numeric_limits<uint64_t>::max() / 1000000000);
-    return current_time_ * 1000000000;
-  }
-
-  void set_current_time(uint64_t time) {
-    assert(time >= current_time_);
-    current_time_ = time;
-  }
-
- private:
-  std::atomic<uint64_t> current_time_{0};
+  std::atomic<size_t> compaction_readahead_size_{};
 };
 
 #ifndef ROCKSDB_LITE
@@ -698,16 +672,11 @@ class DBTestBase : public testing::Test {
     kLevelSubcompactions,
     kBlockBasedTableWithIndexRestartInterval,
     kBlockBasedTableWithPartitionedIndex,
-    kBlockBasedTableWithPartitionedIndexFormat3,
+    kBlockBasedTableWithPartitionedIndexFormat4,
     kPartitionedFilterWithNewTableReaderForCompactions,
-
+    kUniversalSubcompactions,
     // This must be the last line
     kEnd,
-
-    // TODO: This option although been there for a while was disable due to a
-    // mistake. Enabling it makes somem tests to fail. We should enable it and
-    // fix the unit tests.
-    kUniversalSubcompactions,
   };
 
  public:
@@ -737,6 +706,13 @@ class DBTestBase : public testing::Test {
     kSkipFIFOCompaction = 128,
     kSkipMmapReads = 256,
   };
+
+  const int kRangeDelSkipConfigs =
+      // Plain tables do not support range deletions.
+      kSkipPlainTable |
+      // MmapReads disables the iterator pinning that RangeDelAggregator
+      // requires.
+      kSkipMmapReads;
 
   explicit DBTestBase(const std::string path);
 

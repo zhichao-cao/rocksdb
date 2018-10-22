@@ -8,7 +8,10 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 #include "db/version_set.h"
+#include "db/log_writer.h"
+#include "table/mock_table.h"
 #include "util/logging.h"
+#include "util/string_util.h"
 #include "util/testharness.h"
 #include "util/testutil.h"
 
@@ -137,6 +140,35 @@ class VersionStorageInfoTest : public testing::Test {
     f->num_deletions = 0;
     vstorage_.AddFile(level, f);
   }
+
+  void Add(int level, uint32_t file_number, const InternalKey& smallest,
+           const InternalKey& largest, uint64_t file_size = 0) {
+    assert(level < vstorage_.num_levels());
+    FileMetaData* f = new FileMetaData;
+    f->fd = FileDescriptor(file_number, 0, file_size);
+    f->smallest = smallest;
+    f->largest = largest;
+    f->compensated_file_size = file_size;
+    f->refs = 0;
+    f->num_entries = 0;
+    f->num_deletions = 0;
+    vstorage_.AddFile(level, f);
+  }
+
+  std::string GetOverlappingFiles(int level, const InternalKey& begin,
+                                  const InternalKey& end) {
+    std::vector<FileMetaData*> inputs;
+    vstorage_.GetOverlappingInputs(level, &begin, &end, &inputs);
+
+    std::string result;
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      if (i > 0) {
+        result += ",";
+      }
+      AppendNumberTo(&result, inputs[i]->fd.GetNumber());
+    }
+    return result;
+  }
 };
 
 TEST_F(VersionStorageInfoTest, MaxBytesForLevelStatic) {
@@ -236,6 +268,93 @@ TEST_F(VersionStorageInfoTest, MaxBytesForLevelDynamicLargeLevel) {
   ASSERT_EQ(0, logger_->log_count);
 }
 
+TEST_F(VersionStorageInfoTest, MaxBytesForLevelDynamicWithLargeL0_1) {
+  ioptions_.level_compaction_dynamic_level_bytes = true;
+  mutable_cf_options_.max_bytes_for_level_base = 40000;
+  mutable_cf_options_.max_bytes_for_level_multiplier = 5;
+  mutable_cf_options_.level0_file_num_compaction_trigger = 2;
+
+  Add(0, 1U, "1", "2", 10000U);
+  Add(0, 2U, "1", "2", 10000U);
+  Add(0, 3U, "1", "2", 10000U);
+
+  Add(5, 4U, "1", "2", 1286250U);
+  Add(4, 5U, "1", "2", 200000U);
+  Add(3, 6U, "1", "2", 40000U);
+  Add(2, 7U, "1", "2", 8000U);
+
+  vstorage_.CalculateBaseBytes(ioptions_, mutable_cf_options_);
+  ASSERT_EQ(0, logger_->log_count);
+  ASSERT_EQ(2, vstorage_.base_level());
+  // level multiplier should be 3.5
+  ASSERT_EQ(vstorage_.level_multiplier(), 5.0);
+  // Level size should be around 30,000, 105,000, 367,500
+  ASSERT_EQ(40000U, vstorage_.MaxBytesForLevel(2));
+  ASSERT_EQ(51450U, vstorage_.MaxBytesForLevel(3));
+  ASSERT_EQ(257250U, vstorage_.MaxBytesForLevel(4));
+}
+
+TEST_F(VersionStorageInfoTest, MaxBytesForLevelDynamicWithLargeL0_2) {
+  ioptions_.level_compaction_dynamic_level_bytes = true;
+  mutable_cf_options_.max_bytes_for_level_base = 10000;
+  mutable_cf_options_.max_bytes_for_level_multiplier = 5;
+  mutable_cf_options_.level0_file_num_compaction_trigger = 2;
+
+  Add(0, 11U, "1", "2", 10000U);
+  Add(0, 12U, "1", "2", 10000U);
+  Add(0, 13U, "1", "2", 10000U);
+
+  Add(5, 4U, "1", "2", 1286250U);
+  Add(4, 5U, "1", "2", 200000U);
+  Add(3, 6U, "1", "2", 40000U);
+  Add(2, 7U, "1", "2", 8000U);
+
+  vstorage_.CalculateBaseBytes(ioptions_, mutable_cf_options_);
+  ASSERT_EQ(0, logger_->log_count);
+  ASSERT_EQ(2, vstorage_.base_level());
+  // level multiplier should be 3.5
+  ASSERT_LT(vstorage_.level_multiplier(), 3.6);
+  ASSERT_GT(vstorage_.level_multiplier(), 3.4);
+  // Level size should be around 30,000, 105,000, 367,500
+  ASSERT_EQ(30000U, vstorage_.MaxBytesForLevel(2));
+  ASSERT_LT(vstorage_.MaxBytesForLevel(3), 110000U);
+  ASSERT_GT(vstorage_.MaxBytesForLevel(3), 100000U);
+  ASSERT_LT(vstorage_.MaxBytesForLevel(4), 370000U);
+  ASSERT_GT(vstorage_.MaxBytesForLevel(4), 360000U);
+}
+
+TEST_F(VersionStorageInfoTest, MaxBytesForLevelDynamicWithLargeL0_3) {
+  ioptions_.level_compaction_dynamic_level_bytes = true;
+  mutable_cf_options_.max_bytes_for_level_base = 10000;
+  mutable_cf_options_.max_bytes_for_level_multiplier = 5;
+  mutable_cf_options_.level0_file_num_compaction_trigger = 2;
+
+  Add(0, 11U, "1", "2", 5000U);
+  Add(0, 12U, "1", "2", 5000U);
+  Add(0, 13U, "1", "2", 5000U);
+  Add(0, 14U, "1", "2", 5000U);
+  Add(0, 15U, "1", "2", 5000U);
+  Add(0, 16U, "1", "2", 5000U);
+
+  Add(5, 4U, "1", "2", 1286250U);
+  Add(4, 5U, "1", "2", 200000U);
+  Add(3, 6U, "1", "2", 40000U);
+  Add(2, 7U, "1", "2", 8000U);
+
+  vstorage_.CalculateBaseBytes(ioptions_, mutable_cf_options_);
+  ASSERT_EQ(0, logger_->log_count);
+  ASSERT_EQ(2, vstorage_.base_level());
+  // level multiplier should be 3.5
+  ASSERT_LT(vstorage_.level_multiplier(), 3.6);
+  ASSERT_GT(vstorage_.level_multiplier(), 3.4);
+  // Level size should be around 30,000, 105,000, 367,500
+  ASSERT_EQ(30000U, vstorage_.MaxBytesForLevel(2));
+  ASSERT_LT(vstorage_.MaxBytesForLevel(3), 110000U);
+  ASSERT_GT(vstorage_.MaxBytesForLevel(3), 100000U);
+  ASSERT_LT(vstorage_.MaxBytesForLevel(4), 370000U);
+  ASSERT_GT(vstorage_.MaxBytesForLevel(4), 360000U);
+}
+
 TEST_F(VersionStorageInfoTest, EstimateLiveDataSize) {
   // Test whether the overlaps are detected as expected
   Add(1, 1U, "4", "7", 1U);  // Perfect overlap with last level
@@ -258,6 +377,40 @@ TEST_F(VersionStorageInfoTest, EstimateLiveDataSize2) {
   Add(3, 5U, "7", "8", 1U);
   ASSERT_EQ(4U, vstorage_.EstimateLiveDataSize());
 }
+
+TEST_F(VersionStorageInfoTest, GetOverlappingInputs) {
+  // Two files that overlap at the range deletion tombstone sentinel.
+  Add(1, 1U, {"a", 0, kTypeValue}, {"b", kMaxSequenceNumber, kTypeRangeDeletion}, 1);
+  Add(1, 2U, {"b", 0, kTypeValue}, {"c", 0, kTypeValue}, 1);
+  // Two files that overlap at the same user key.
+  Add(1, 3U, {"d", 0, kTypeValue}, {"e", kMaxSequenceNumber, kTypeValue}, 1);
+  Add(1, 4U, {"e", 0, kTypeValue}, {"f", 0, kTypeValue}, 1);
+  // Two files that do not overlap.
+  Add(1, 5U, {"g", 0, kTypeValue}, {"h", 0, kTypeValue}, 1);
+  Add(1, 6U, {"i", 0, kTypeValue}, {"j", 0, kTypeValue}, 1);
+  vstorage_.UpdateNumNonEmptyLevels();
+  vstorage_.GenerateLevelFilesBrief();
+
+  ASSERT_EQ("1,2", GetOverlappingFiles(
+      1, {"a", 0, kTypeValue}, {"b", 0, kTypeValue}));
+  ASSERT_EQ("1", GetOverlappingFiles(
+      1, {"a", 0, kTypeValue}, {"b", kMaxSequenceNumber, kTypeRangeDeletion}));
+  ASSERT_EQ("2", GetOverlappingFiles(
+      1, {"b", kMaxSequenceNumber, kTypeValue}, {"c", 0, kTypeValue}));
+  ASSERT_EQ("3,4", GetOverlappingFiles(
+      1, {"d", 0, kTypeValue}, {"e", 0, kTypeValue}));
+  ASSERT_EQ("3", GetOverlappingFiles(
+      1, {"d", 0, kTypeValue}, {"e", kMaxSequenceNumber, kTypeRangeDeletion}));
+  ASSERT_EQ("3,4", GetOverlappingFiles(
+      1, {"e", kMaxSequenceNumber, kTypeValue}, {"f", 0, kTypeValue}));
+  ASSERT_EQ("3,4", GetOverlappingFiles(
+      1, {"e", 0, kTypeValue}, {"f", 0, kTypeValue}));
+  ASSERT_EQ("5", GetOverlappingFiles(
+      1, {"g", 0, kTypeValue}, {"h", 0, kTypeValue}));
+  ASSERT_EQ("6", GetOverlappingFiles(
+      1, {"i", 0, kTypeValue}, {"j", 0, kTypeValue}));
+}
+
 
 class FindLevelFileTest : public testing::Test {
  public:
@@ -452,6 +605,133 @@ TEST_F(FindLevelFileTest, LevelOverlappingFiles) {
   ASSERT_TRUE(Overlaps("600", "700"));
 }
 
+class ManifestWriterTest : public testing::Test {
+ public:
+  ManifestWriterTest()
+      : env_(Env::Default()),
+        dbname_(test::PerThreadDBPath("version_set_test")),
+        db_options_(),
+        mutable_cf_options_(cf_options_),
+        table_cache_(NewLRUCache(50000, 16)),
+        write_buffer_manager_(db_options_.db_write_buffer_size),
+        versions_(new VersionSet(dbname_, &db_options_, env_options_,
+                                 table_cache_.get(), &write_buffer_manager_,
+                                 &write_controller_)),
+        shutting_down_(false),
+        mock_table_factory_(std::make_shared<mock::MockTableFactory>()) {
+    EXPECT_OK(env_->CreateDirIfMissing(dbname_));
+    db_options_.db_paths.emplace_back(dbname_,
+                                      std::numeric_limits<uint64_t>::max());
+  }
+
+  // Create DB with 3 column families.
+  void NewDB() {
+    VersionEdit new_db;
+    new_db.SetLogNumber(0);
+    new_db.SetNextFile(2);
+    new_db.SetLastSequence(0);
+
+    const std::vector<std::string> cf_names = {kDefaultColumnFamilyName,
+                                               "alice", "bob"};
+    const int kInitialNumOfCfs = static_cast<int>(cf_names.size());
+    autovector<VersionEdit> new_cfs;
+    uint64_t last_seq = 1;
+    uint32_t cf_id = 1;
+    for (int i = 1; i != kInitialNumOfCfs; ++i) {
+      VersionEdit new_cf;
+      new_cf.AddColumnFamily(cf_names[i]);
+      new_cf.SetColumnFamily(cf_id++);
+      new_cf.SetLogNumber(0);
+      new_cf.SetNextFile(2);
+      new_cf.SetLastSequence(last_seq++);
+      new_cfs.emplace_back(new_cf);
+    }
+
+    const std::string manifest = DescriptorFileName(dbname_, 1);
+    unique_ptr<WritableFile> file;
+    Status s = env_->NewWritableFile(
+        manifest, &file, env_->OptimizeForManifestWrite(env_options_));
+    ASSERT_OK(s);
+    unique_ptr<WritableFileWriter> file_writer(
+        new WritableFileWriter(std::move(file), manifest, env_options_));
+    {
+      log::Writer log(std::move(file_writer), 0, false);
+      std::string record;
+      new_db.EncodeTo(&record);
+      s = log.AddRecord(record);
+      for (const auto& e : new_cfs) {
+        e.EncodeTo(&record);
+        s = log.AddRecord(record);
+        ASSERT_OK(s);
+      }
+    }
+    ASSERT_OK(s);
+    // Make "CURRENT" file point to the new manifest file.
+    s = SetCurrentFile(env_, dbname_, 1, nullptr);
+
+    std::vector<ColumnFamilyDescriptor> column_families;
+    cf_options_.table_factory = mock_table_factory_;
+    for (const auto& cf_name : cf_names) {
+      column_families.emplace_back(cf_name, cf_options_);
+    }
+
+    EXPECT_OK(versions_->Recover(column_families, false));
+    EXPECT_EQ(kInitialNumOfCfs,
+              versions_->GetColumnFamilySet()->NumberOfColumnFamilies());
+    for (auto cfd : *versions_->GetColumnFamilySet()) {
+      cfds_.emplace_back(cfd);
+    }
+  }
+
+  Env* env_;
+  const std::string dbname_;
+  EnvOptions env_options_;
+  ImmutableDBOptions db_options_;
+  ColumnFamilyOptions cf_options_;
+  MutableCFOptions mutable_cf_options_;
+  std::shared_ptr<Cache> table_cache_;
+  WriteController write_controller_;
+  WriteBufferManager write_buffer_manager_;
+  std::unique_ptr<VersionSet> versions_;
+  InstrumentedMutex mutex_;
+  std::atomic<bool> shutting_down_;
+  std::shared_ptr<mock::MockTableFactory> mock_table_factory_;
+  std::vector<ColumnFamilyData*> cfds_;
+};
+
+TEST_F(ManifestWriterTest, SameColumnFamilyGroupCommit) {
+  NewDB();
+  const int kGroupSize = 5;
+  autovector<VersionEdit> edits;
+  for (int i = 0; i != kGroupSize; ++i) {
+    edits.emplace_back(VersionEdit());
+  }
+  autovector<ColumnFamilyData*> cfds;
+  autovector<const MutableCFOptions*> all_mutable_cf_options;
+  autovector<autovector<VersionEdit*>> edit_lists;
+  for (int i = 0; i != kGroupSize; ++i) {
+    cfds.emplace_back(cfds_[0]);
+    all_mutable_cf_options.emplace_back(&mutable_cf_options_);
+    autovector<VersionEdit*> edit_list;
+    edit_list.emplace_back(&edits[i]);
+    edit_lists.emplace_back(edit_list);
+  }
+
+  int count = 0;
+  SyncPoint::GetInstance()->SetCallBack(
+      "VersionSet::ProcessManifestWrites:SameColumnFamily", [&](void* arg) {
+        uint32_t* cf_id = reinterpret_cast<uint32_t*>(arg);
+        EXPECT_EQ(0, *cf_id);
+        ++count;
+      });
+  SyncPoint::GetInstance()->EnableProcessing();
+  mutex_.Lock();
+  Status s =
+      versions_->LogAndApply(cfds, all_mutable_cf_options, edit_lists, &mutex_);
+  mutex_.Unlock();
+  EXPECT_OK(s);
+  EXPECT_EQ(kGroupSize - 1, count);
+}
 }  // namespace rocksdb
 
 int main(int argc, char** argv) {

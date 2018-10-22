@@ -34,7 +34,6 @@ namespace rocksdb {
 class Mutex;
 class MemTableIterator;
 class MergeContext;
-class InternalIterator;
 
 struct ImmutableMemTableOptions {
   explicit ImmutableMemTableOptions(const ImmutableCFOptions& ioptions,
@@ -337,6 +336,14 @@ class MemTable {
     mem_tracker_.DoneAllocating();
   }
 
+  // Notify the underlying storage that all data it contained has been
+  // persisted.
+  // REQUIRES: external synchronization to prevent simultaneous
+  // operations on the same MemTable.
+  void MarkFlushed() {
+    table_->MarkFlushed();
+  }
+
   // return true if the current MemTableRep supports merge operator.
   bool IsMergeOperatorSupported() const {
     return table_->IsMergeOperatorSupported();
@@ -375,6 +382,14 @@ class MemTable {
   void SetID(uint64_t id) { id_ = id; }
 
   uint64_t GetID() const { return id_; }
+
+  SequenceNumber& TEST_AtomicFlushSequenceNumber() {
+    return atomic_flush_seqno_;
+  }
+
+  void TEST_SetFlushCompleted(bool completed) { flush_completed_ = completed; }
+
+  void TEST_SetFileNumber(uint64_t file_num) { file_number_ = file_num; }
 
  private:
   enum FlushStateEnum { FLUSH_NOT_REQUESTED, FLUSH_REQUESTED, FLUSH_SCHEDULED };
@@ -447,6 +462,12 @@ class MemTable {
 
   // Memtable id to track flush.
   uint64_t id_ = 0;
+
+  // Sequence number of the atomic flush that is responsible for this memtable.
+  // The sequence number of atomic flush is a seq, such that no writes with
+  // sequence numbers greater than or equal to seq are flushed, while all
+  // writes with sequence number smaller than seq are flushed.
+  SequenceNumber atomic_flush_seqno_;
 
   // Returns a heuristic flush decision
   bool ShouldFlushNow() const;

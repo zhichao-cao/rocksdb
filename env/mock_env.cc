@@ -201,7 +201,7 @@ class MockSequentialFile : public SequentialFile {
     if (n > available) {
       n = available;
     }
-    pos_ += n;
+    pos_ += static_cast<size_t>(n);
     return Status::OK();
   }
 
@@ -319,7 +319,7 @@ class TestMemLogger : public Logger {
   static const uint64_t flush_every_seconds_ = 5;
   std::atomic_uint_fast64_t last_flush_micros_;
   Env* env_;
-  bool flush_pending_;
+  std::atomic<bool> flush_pending_;
 
  public:
   TestMemLogger(std::unique_ptr<WritableFile> f, Env* env,

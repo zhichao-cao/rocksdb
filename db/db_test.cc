@@ -262,6 +262,196 @@ TEST_F(DBTest, SkipDelay) {
   }
 }
 
+TEST_F(DBTest, MixedSlowdownOptions) {
+  Options options = CurrentOptions();
+  options.env = env_;
+  options.write_buffer_size = 100000;
+  CreateAndReopenWithCF({"pikachu"}, options);
+  std::vector<port::Thread> threads;
+  std::atomic<int> thread_num(0);
+
+  std::function<void()> write_slowdown_func = [&]() {
+    int a = thread_num.fetch_add(1);
+    std::string key = "foo" + std::to_string(a);
+    WriteOptions wo;
+    wo.no_slowdown = false;
+    ASSERT_OK(dbfull()->Put(wo, key, "bar"));
+  };
+  std::function<void()> write_no_slowdown_func = [&]() {
+    int a = thread_num.fetch_add(1);
+    std::string key = "foo" + std::to_string(a);
+    WriteOptions wo;
+    wo.no_slowdown = true;
+    ASSERT_NOK(dbfull()->Put(wo, key, "bar"));
+  };
+  // Use a small number to ensure a large delay that is still effective
+  // when we do Put
+  // TODO(myabandeh): this is time dependent and could potentially make
+  // the test flaky
+  auto token = dbfull()->TEST_write_controler().GetDelayToken(1);
+  std::atomic<int> sleep_count(0);
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+      "DBImpl::DelayWrite:BeginWriteStallDone",
+      [&](void* /*arg*/) {
+        sleep_count.fetch_add(1);
+        if (threads.empty()) {
+          for (int i = 0; i < 2; ++i) {
+            threads.emplace_back(write_slowdown_func);
+          }
+          for (int i = 0; i < 2; ++i) {
+            threads.emplace_back(write_no_slowdown_func);
+          }
+        }
+      });
+  rocksdb::SyncPoint::GetInstance()->EnableProcessing();
+
+  WriteOptions wo;
+  wo.sync = false;
+  wo.disableWAL = false;
+  wo.no_slowdown = false;
+  dbfull()->Put(wo, "foo", "bar");
+  // We need the 2nd write to trigger delay. This is because delay is
+  // estimated based on the last write size which is 0 for the first write.
+  ASSERT_OK(dbfull()->Put(wo, "foo2", "bar2"));
+          token.reset();
+
+  for (auto& t : threads) {
+    t.join();
+  }
+  ASSERT_GE(sleep_count.load(), 1);
+
+  wo.no_slowdown = true;
+  ASSERT_OK(dbfull()->Put(wo, "foo3", "bar"));
+}
+
+TEST_F(DBTest, MixedSlowdownOptionsInQueue) {
+  Options options = CurrentOptions();
+  options.env = env_;
+  options.write_buffer_size = 100000;
+  CreateAndReopenWithCF({"pikachu"}, options);
+  std::vector<port::Thread> threads;
+  std::atomic<int> thread_num(0);
+
+  std::function<void()> write_no_slowdown_func = [&]() {
+    int a = thread_num.fetch_add(1);
+    std::string key = "foo" + std::to_string(a);
+    WriteOptions wo;
+    wo.no_slowdown = true;
+    ASSERT_NOK(dbfull()->Put(wo, key, "bar"));
+  };
+  // Use a small number to ensure a large delay that is still effective
+  // when we do Put
+  // TODO(myabandeh): this is time dependent and could potentially make
+  // the test flaky
+  auto token = dbfull()->TEST_write_controler().GetDelayToken(1);
+  std::atomic<int> sleep_count(0);
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+      "DBImpl::DelayWrite:Sleep",
+      [&](void* /*arg*/) {
+        sleep_count.fetch_add(1);
+        if (threads.empty()) {
+          for (int i = 0; i < 2; ++i) {
+            threads.emplace_back(write_no_slowdown_func);
+          }
+          // Sleep for 2s to allow the threads to insert themselves into the
+          // write queue
+          env_->SleepForMicroseconds(3000000ULL);
+        }
+      });
+  std::atomic<int> wait_count(0);
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+      "DBImpl::DelayWrite:Wait",
+      [&](void* /*arg*/) { wait_count.fetch_add(1); });
+  rocksdb::SyncPoint::GetInstance()->EnableProcessing();
+
+  WriteOptions wo;
+  wo.sync = false;
+  wo.disableWAL = false;
+  wo.no_slowdown = false;
+  dbfull()->Put(wo, "foo", "bar");
+  // We need the 2nd write to trigger delay. This is because delay is
+  // estimated based on the last write size which is 0 for the first write.
+  ASSERT_OK(dbfull()->Put(wo, "foo2", "bar2"));
+          token.reset();
+
+  for (auto& t : threads) {
+    t.join();
+  }
+  ASSERT_EQ(sleep_count.load(), 1);
+  ASSERT_GE(wait_count.load(), 0);
+}
+
+TEST_F(DBTest, MixedSlowdownOptionsStop) {
+  Options options = CurrentOptions();
+  options.env = env_;
+  options.write_buffer_size = 100000;
+  CreateAndReopenWithCF({"pikachu"}, options);
+  std::vector<port::Thread> threads;
+  std::atomic<int> thread_num(0);
+
+  std::function<void()> write_slowdown_func = [&]() {
+    int a = thread_num.fetch_add(1);
+    std::string key = "foo" + std::to_string(a);
+    WriteOptions wo;
+    wo.no_slowdown = false;
+    ASSERT_OK(dbfull()->Put(wo, key, "bar"));
+  };
+  std::function<void()> write_no_slowdown_func = [&]() {
+    int a = thread_num.fetch_add(1);
+    std::string key = "foo" + std::to_string(a);
+    WriteOptions wo;
+    wo.no_slowdown = true;
+    ASSERT_NOK(dbfull()->Put(wo, key, "bar"));
+  };
+  std::function<void()> wakeup_writer = [&]() {
+    dbfull()->mutex_.Lock();
+    dbfull()->bg_cv_.SignalAll();
+    dbfull()->mutex_.Unlock();
+  };
+  // Use a small number to ensure a large delay that is still effective
+  // when we do Put
+  // TODO(myabandeh): this is time dependent and could potentially make
+  // the test flaky
+  auto token = dbfull()->TEST_write_controler().GetStopToken();
+  std::atomic<int> wait_count(0);
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+      "DBImpl::DelayWrite:Wait",
+      [&](void* /*arg*/) {
+        wait_count.fetch_add(1);
+        if (threads.empty()) {
+          for (int i = 0; i < 2; ++i) {
+            threads.emplace_back(write_slowdown_func);
+          }
+          for (int i = 0; i < 2; ++i) {
+            threads.emplace_back(write_no_slowdown_func);
+          }
+          // Sleep for 2s to allow the threads to insert themselves into the
+          // write queue
+          env_->SleepForMicroseconds(3000000ULL);
+        }
+        token.reset();
+        threads.emplace_back(wakeup_writer);
+      });
+  rocksdb::SyncPoint::GetInstance()->EnableProcessing();
+
+  WriteOptions wo;
+  wo.sync = false;
+  wo.disableWAL = false;
+  wo.no_slowdown = false;
+  dbfull()->Put(wo, "foo", "bar");
+  // We need the 2nd write to trigger delay. This is because delay is
+  // estimated based on the last write size which is 0 for the first write.
+  ASSERT_OK(dbfull()->Put(wo, "foo2", "bar2"));
+          token.reset();
+
+  for (auto& t : threads) {
+    t.join();
+  }
+  ASSERT_GE(wait_count.load(), 1);
+
+  wo.no_slowdown = true;
+  ASSERT_OK(dbfull()->Put(wo, "foo3", "bar"));
+}
 #ifndef ROCKSDB_LITE
 
 TEST_F(DBTest, LevelLimitReopen) {
@@ -1682,7 +1872,7 @@ TEST_F(DBTest, CustomComparator) {
 
 TEST_F(DBTest, DBOpen_Options) {
   Options options = CurrentOptions();
-  std::string dbname = test::TmpDir(env_) + "/db_options_test";
+  std::string dbname = test::PerThreadDBPath("db_options_test");
   ASSERT_OK(DestroyDB(dbname, options));
 
   // Does not exist, and create_if_missing == false: error
@@ -1740,7 +1930,7 @@ TEST_F(DBTest, DBOpen_Change_NumLevels) {
 }
 
 TEST_F(DBTest, DestroyDBMetaDatabase) {
-  std::string dbname = test::TmpDir(env_) + "/db_meta";
+  std::string dbname = test::PerThreadDBPath("db_meta");
   ASSERT_OK(env_->CreateDirIfMissing(dbname));
   std::string metadbname = MetaDatabaseName(dbname, 0);
   ASSERT_OK(env_->CreateDirIfMissing(metadbname));
@@ -2123,6 +2313,9 @@ INSTANTIATE_TEST_CASE_P(
 #endif  // ROCKSDB_LITE
 
 // Group commit test:
+#if !defined(TRAVIS) && !defined(OS_WIN)
+// Disable this test temporarily on Travis and appveyor as it fails
+// intermittently. Github issue: #4151
 namespace {
 
 static const int kGCNumThreads = 4;
@@ -2195,6 +2388,7 @@ TEST_F(DBTest, GroupCommitTest) {
     ASSERT_GT(hist_data.average, 0.0);
   } while (ChangeOptions(kSkipNoSeekToLast));
 }
+#endif  // TRAVIS
 
 namespace {
 typedef std::map<std::string, std::string> KVMap;
@@ -4327,7 +4521,7 @@ TEST_F(DBTest, DynamicCompactionOptions) {
   // Clean up memtable and L0. Block compaction threads. If continue to write
   // and flush memtables. We should see put stop after 8 memtable flushes
   // since level0_stop_writes_trigger = 8
-  dbfull()->TEST_FlushMemTable(true);
+  dbfull()->TEST_FlushMemTable(true, true);
   dbfull()->CompactRange(CompactRangeOptions(), nullptr, nullptr);
   // Block compaction
   test::SleepingBackgroundTask sleeping_task_low;
@@ -4340,7 +4534,7 @@ TEST_F(DBTest, DynamicCompactionOptions) {
   WriteOptions wo;
   while (count < 64) {
     ASSERT_OK(Put(Key(count), RandomString(&rnd, 1024), wo));
-    dbfull()->TEST_FlushMemTable(true);
+    dbfull()->TEST_FlushMemTable(true, true);
     count++;
     if (dbfull()->TEST_write_controler().IsStopped()) {
       sleeping_task_low.WakeUp();
@@ -4368,7 +4562,7 @@ TEST_F(DBTest, DynamicCompactionOptions) {
   count = 0;
   while (count < 64) {
     ASSERT_OK(Put(Key(count), RandomString(&rnd, 1024), wo));
-    dbfull()->TEST_FlushMemTable(true);
+    dbfull()->TEST_FlushMemTable(true, true);
     count++;
     if (dbfull()->TEST_write_controler().IsStopped()) {
       sleeping_task_low.WakeUp();
@@ -4607,180 +4801,6 @@ TEST_F(DBTest, FileCreationRandomFailure) {
 }
 
 #ifndef ROCKSDB_LITE
-int CountIter(Iterator* iter, const Slice& key) {
-  int count = 0;
-  for (iter->Seek(key); iter->Valid() && iter->status() == Status::OK();
-       iter->Next()) {
-    count++;
-  }
-  return count;
-}
-
-// Create multiple SST files each with a different prefix_extractor config,
-// verify iterators can read all SST files using the latest config.
-TEST_F(DBTest, DynamicBloomFilterMultipleSST) {
-  Options options;
-  options.create_if_missing = true;
-  options.prefix_extractor.reset(NewFixedPrefixTransform(1));
-  options.disable_auto_compactions = true;
-  // Enable prefix bloom for SST files
-  BlockBasedTableOptions table_options;
-  table_options.filter_policy.reset(NewBloomFilterPolicy(10, true));
-  options.table_factory.reset(NewBlockBasedTableFactory(table_options));
-  DestroyAndReopen(options);
-
-  ReadOptions read_options;
-  read_options.prefix_same_as_start = true;
-
-  // first SST with fixed:1 BF
-  ASSERT_OK(Put("foo2", "bar2"));
-  ASSERT_OK(Put("foo", "bar"));
-  ASSERT_OK(Put("foq1", "bar1"));
-  ASSERT_OK(Put("fpa", "0"));
-  dbfull()->Flush(FlushOptions());
-  Iterator* iter_old = db_->NewIterator(read_options);
-  ASSERT_EQ(CountIter(iter_old, "foo"), 4);
-
-  ASSERT_OK(dbfull()->SetOptions({{"prefix_extractor", "capped:3"}}));
-  ASSERT_EQ(0, strcmp(dbfull()->GetOptions().prefix_extractor->Name(),
-                      "rocksdb.CappedPrefix.3"));
-  Iterator* iter = db_->NewIterator(read_options);
-  ASSERT_EQ(CountIter(iter, "foo"), 2);
-
-  // second SST with capped:3 BF
-  ASSERT_OK(Put("foo3", "bar3"));
-  ASSERT_OK(Put("foo4", "bar4"));
-  ASSERT_OK(Put("foq5", "bar5"));
-  ASSERT_OK(Put("fpb", "1"));
-  dbfull()->Flush(FlushOptions());
-  // BF is cappped:3 now
-  Iterator* iter_tmp = db_->NewIterator(read_options);
-  ASSERT_EQ(CountIter(iter_tmp, "foo"), 4);
-  delete iter_tmp;
-
-  ASSERT_OK(dbfull()->SetOptions({{"prefix_extractor", "fixed:2"}}));
-  ASSERT_EQ(0, strcmp(dbfull()->GetOptions().prefix_extractor->Name(),
-                      "rocksdb.FixedPrefix.2"));
-  // third SST with fixed:2 BF
-  ASSERT_OK(Put("foo6", "bar6"));
-  ASSERT_OK(Put("foo7", "bar7"));
-  ASSERT_OK(Put("foq8", "bar8"));
-  ASSERT_OK(Put("fpc", "2"));
-  dbfull()->Flush(FlushOptions());
-  // BF is fixed:2 now
-  iter_tmp = db_->NewIterator(read_options);
-  ASSERT_EQ(CountIter(iter_tmp, "foo"), 9);
-  delete iter_tmp;
-
-  // TODO(Zhongyi): verify existing iterator cannot see newly inserted keys
-  ASSERT_EQ(CountIter(iter_old, "foo"), 4);
-  ASSERT_EQ(CountIter(iter, "foo"), 2);
-  delete iter;
-  delete iter_old;
-
-  // keys in all three SSTs are visible to iterator
-  Iterator* iter_all = db_->NewIterator(read_options);
-  ASSERT_EQ(CountIter(iter_all, "foo"), 9);
-  delete iter_all;
-  ASSERT_OK(dbfull()->SetOptions({{"prefix_extractor", "capped:3"}}));
-  ASSERT_EQ(0, strcmp(dbfull()->GetOptions().prefix_extractor->Name(),
-                      "rocksdb.CappedPrefix.3"));
-  iter_all = db_->NewIterator(read_options);
-  ASSERT_EQ(CountIter(iter_all, "foo"), 6);
-  delete iter_all;
-  // TODO(Zhongyi): add test for cases where certain SST are skipped
-  // Also verify BF related counters like BLOOM_FILTER_USEFUL
-}
-
-// Create a new column family in a running DB, change prefix_extractor
-// dynamically, verify the iterator created on the new column family behaves
-// as expected
-TEST_F(DBTest, DynamicBloomFilterNewColumnFamily) {
-  Options options = CurrentOptions();
-  options.create_if_missing = true;
-  options.prefix_extractor.reset(NewFixedPrefixTransform(1));
-  options.disable_auto_compactions = true;
-  // Enable prefix bloom for SST files
-  BlockBasedTableOptions table_options;
-  table_options.filter_policy.reset(NewBloomFilterPolicy(10, true));
-  options.table_factory.reset(NewBlockBasedTableFactory(table_options));
-  CreateAndReopenWithCF({"pikachu"}, options);
-  ReadOptions read_options;
-  read_options.prefix_same_as_start = true;
-  // create a new CF and set prefix_extractor dynamically
-  options.prefix_extractor.reset(NewCappedPrefixTransform(3));
-  CreateColumnFamilies({"ramen_dojo"}, options);
-  ASSERT_EQ(0,
-            strcmp(dbfull()->GetOptions(handles_[2]).prefix_extractor->Name(),
-                   "rocksdb.CappedPrefix.3"));
-  ASSERT_OK(Put(2, "foo3", "bar3"));
-  ASSERT_OK(Put(2, "foo4", "bar4"));
-  ASSERT_OK(Put(2, "foo5", "bar5"));
-  ASSERT_OK(Put(2, "foq6", "bar6"));
-  ASSERT_OK(Put(2, "fpq7", "bar7"));
-  dbfull()->Flush(FlushOptions());
-  Iterator* iter = db_->NewIterator(read_options, handles_[2]);
-  ASSERT_EQ(CountIter(iter, "foo"), 3);
-  delete iter;
-  ASSERT_OK(
-      dbfull()->SetOptions(handles_[2], {{"prefix_extractor", "fixed:2"}}));
-  ASSERT_EQ(0,
-            strcmp(dbfull()->GetOptions(handles_[2]).prefix_extractor->Name(),
-                   "rocksdb.FixedPrefix.2"));
-  iter = db_->NewIterator(read_options, handles_[2]);
-  ASSERT_EQ(CountIter(iter, "foo"), 4);
-  delete iter;
-}
-
-// Verify it's possible to change prefix_extractor at runtime and iterators
-// behaves as expected
-TEST_F(DBTest, DynamicBloomFilterOptions) {
-  Options options;
-  options.create_if_missing = true;
-  options.prefix_extractor.reset(NewFixedPrefixTransform(1));
-  options.disable_auto_compactions = true;
-  // Enable prefix bloom for SST files
-  BlockBasedTableOptions table_options;
-  table_options.filter_policy.reset(NewBloomFilterPolicy(10, true));
-  options.table_factory.reset(NewBlockBasedTableFactory(table_options));
-  DestroyAndReopen(options);
-
-  ASSERT_OK(Put("foo2", "bar2"));
-  ASSERT_OK(Put("foo", "bar"));
-  ASSERT_OK(Put("foo1", "bar1"));
-  ASSERT_OK(Put("fpa", "0"));
-  dbfull()->Flush(FlushOptions());
-  ASSERT_OK(Put("foo3", "bar3"));
-  ASSERT_OK(Put("foo4", "bar4"));
-  ASSERT_OK(Put("foo5", "bar5"));
-  ASSERT_OK(Put("fpb", "1"));
-  dbfull()->Flush(FlushOptions());
-  ASSERT_OK(Put("foo6", "bar6"));
-  ASSERT_OK(Put("foo7", "bar7"));
-  ASSERT_OK(Put("foo8", "bar8"));
-  ASSERT_OK(Put("fpc", "2"));
-  dbfull()->Flush(FlushOptions());
-
-  ReadOptions read_options;
-  read_options.prefix_same_as_start = true;
-  Iterator* iter = db_->NewIterator(read_options);
-  ASSERT_EQ(CountIter(iter, "foo"), 12);
-  delete iter;
-  Iterator* iter_old = db_->NewIterator(read_options);
-  ASSERT_EQ(CountIter(iter_old, "foo"), 12);
-
-  ASSERT_OK(dbfull()->SetOptions({{"prefix_extractor", "capped:3"}}));
-  ASSERT_EQ(0, strcmp(dbfull()->GetOptions().prefix_extractor->Name(),
-                      "rocksdb.CappedPrefix.3"));
-  iter = db_->NewIterator(read_options);
-  // "fp*" should be skipped
-  ASSERT_EQ(CountIter(iter, "foo"), 9);
-  delete iter;
-
-  // iterator created before should not be affected and see all keys
-  ASSERT_EQ(CountIter(iter_old, "foo"), 12);
-  delete iter_old;
-}
 
 TEST_F(DBTest, DynamicMiscOptions) {
   // Test max_sequential_skip_in_iterations
@@ -5682,7 +5702,7 @@ TEST_F(DBTest, SoftLimit) {
   for (int i = 0; i < 72; i++) {
     Put(Key(i), std::string(5000, 'x'));
     if (i % 10 == 0) {
-      Flush();
+      dbfull()->TEST_FlushMemTable(true, true);
     }
   }
   dbfull()->TEST_WaitForCompact();
@@ -5692,7 +5712,7 @@ TEST_F(DBTest, SoftLimit) {
   for (int i = 0; i < 72; i++) {
     Put(Key(i), std::string(5000, 'x'));
     if (i % 10 == 0) {
-      Flush();
+      dbfull()->TEST_FlushMemTable(true, true);
     }
   }
   dbfull()->TEST_WaitForCompact();
@@ -5711,7 +5731,7 @@ TEST_F(DBTest, SoftLimit) {
     Put(Key(i), std::string(5000, 'x'));
     Put(Key(100 - i), std::string(5000, 'x'));
     // Flush the file. File size is around 30KB.
-    Flush();
+    dbfull()->TEST_FlushMemTable(true, true);
   }
   ASSERT_TRUE(dbfull()->TEST_write_controler().NeedsDelay());
   ASSERT_TRUE(listener->CheckCondition(WriteStallCondition::kDelayed));
@@ -5746,7 +5766,7 @@ TEST_F(DBTest, SoftLimit) {
     Put(Key(10 + i), std::string(5000, 'x'));
     Put(Key(90 - i), std::string(5000, 'x'));
     // Flush the file. File size is around 30KB.
-    Flush();
+    dbfull()->TEST_FlushMemTable(true, true);
   }
 
   // Wake up sleep task to enable compaction to run and waits
@@ -5767,7 +5787,7 @@ TEST_F(DBTest, SoftLimit) {
     Put(Key(20 + i), std::string(5000, 'x'));
     Put(Key(80 - i), std::string(5000, 'x'));
     // Flush the file. File size is around 30KB.
-    Flush();
+    dbfull()->TEST_FlushMemTable(true, true);
   }
   // Wake up sleep task to enable compaction to run and waits
   // for it to go to sleep state again to make sure one compaction

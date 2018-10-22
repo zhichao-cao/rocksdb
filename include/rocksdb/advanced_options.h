@@ -126,19 +126,32 @@ struct CompressionOptions {
   // Default: 0.
   uint32_t zstd_max_train_bytes;
 
+  // When the compression options are set by the user, it will be set to "true".
+  // For bottommost_compression_opts, to enable it, user must set enabled=true.
+  // Otherwise, bottommost compression will use compression_opts as default
+  // compression options.
+  //
+  // For compression_opts, if compression_opts.enabled=false, it is still
+  // used as compression options for compression process.
+  //
+  // Default: false.
+  bool enabled;
+
   CompressionOptions()
       : window_bits(-14),
         level(kDefaultCompressionLevel),
         strategy(0),
         max_dict_bytes(0),
-        zstd_max_train_bytes(0) {}
+        zstd_max_train_bytes(0),
+        enabled(false) {}
   CompressionOptions(int wbits, int _lev, int _strategy, int _max_dict_bytes,
-                     int _zstd_max_train_bytes)
+                     int _zstd_max_train_bytes, bool _enabled)
       : window_bits(wbits),
         level(_lev),
         strategy(_strategy),
         max_dict_bytes(_max_dict_bytes),
-        zstd_max_train_bytes(_zstd_max_train_bytes) {}
+        zstd_max_train_bytes(_zstd_max_train_bytes),
+        enabled(_enabled) {}
 };
 
 enum UpdateStatus {    // Return status For inplace update callback
@@ -400,6 +413,7 @@ struct AdvancedColumnFamilyOptions {
   //    of the level.
   // At the same time max_bytes_for_level_multiplier and
   // max_bytes_for_level_multiplier_additional are still satisfied.
+  // (When L0 is too large, we make some adjustment. See below.)
   //
   // With this option on, from an empty DB, we make last level the base level,
   // which means merging L0 data into the last level, until it exceeds
@@ -437,6 +451,29 @@ struct AdvancedColumnFamilyOptions {
   // By doing it, we give max_bytes_for_level_multiplier a priority against
   // max_bytes_for_level_base, for a more predictable LSM tree shape. It is
   // useful to limit worse case space amplification.
+  //
+  //
+  // If the compaction from L0 is lagged behind, a special mode will be turned
+  // on to prioritize write amplification against max_bytes_for_level_multiplier
+  // or max_bytes_for_level_base. The L0 compaction is lagged behind by looking
+  // at number of L0 files and total L0 size. If number of L0 files is at least
+  // the double of level0_file_num_compaction_trigger, or the total size is
+  // at least max_bytes_for_level_base, this mode is on. The target of L1 grows
+  // to the actual data size in L0, and then determine the target for each level
+  // so that each level will have the same level multiplier.
+  //
+  // For example, when L0 size is 100MB, the size of last level is 1600MB,
+  // max_bytes_for_level_base = 80MB, and max_bytes_for_level_multiplier = 10.
+  // Since L0 size is larger than max_bytes_for_level_base, this is a L0
+  // compaction backlogged mode. So that the L1 size is determined to be 100MB.
+  // Based on max_bytes_for_level_multiplier = 10, at least 3 non-0 levels will
+  // be needed. The level multiplier will be calculated to be 4 and the three
+  // levels' target to be [100MB, 400MB, 1600MB].
+  //
+  // In this mode, The number of levels will be no more than the normal mode,
+  // and the level multiplier will be lower. The write amplification will
+  // likely to be reduced.
+  //
   //
   // max_bytes_for_level_multiplier_additional is ignored with this flag on.
   //
@@ -583,6 +620,8 @@ struct AdvancedColumnFamilyOptions {
   // Enabled only for level compaction for now.
   //
   // Default: 0 (disabled)
+  //
+  // Dynamically changeable through SetOptions() API
   uint64_t ttl = 0;
 
   // Create ColumnFamilyOptions with default values for all fields

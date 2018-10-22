@@ -52,7 +52,6 @@ class Writer;
 }
 
 class Compaction;
-class InternalIterator;
 class LogBuffer;
 class LookupKey;
 class MemTable;
@@ -137,7 +136,8 @@ class VersionStorageInfo {
 
   // This computes ttl_expired_files_ and is called by
   // ComputeCompactionScore()
-  void ComputeExpiredTtlFiles(const ImmutableCFOptions& ioptions);
+  void ComputeExpiredTtlFiles(const ImmutableCFOptions& ioptions,
+                              const uint64_t ttl);
 
   // This computes bottommost_files_marked_for_compaction_ and is called by
   // ComputeCompactionScore() or UpdateOldestSnapshot().
@@ -188,9 +188,11 @@ class VersionStorageInfo {
       std::vector<FileMetaData*>* inputs,
       int hint_index = -1,        // index of overlap file
       int* file_index = nullptr,  // return index of overlap file
-      bool expand_range = true)   // if set, returns files which overlap the
-      const;                      // range and overlap each other. If false,
+      bool expand_range = true,   // if set, returns files which overlap the
+                                  // range and overlap each other. If false,
                                   // then just files intersecting the range
+      InternalKey** next_smallest = nullptr)  // if non-null, returns the
+      const;  // smallest key of next file not included
   void GetCleanInputsWithinInterval(
       int level, const InternalKey* begin,  // nullptr means before all keys
       const InternalKey* end,               // nullptr means after all keys
@@ -200,31 +202,32 @@ class VersionStorageInfo {
       const;
 
   void GetOverlappingInputsRangeBinarySearch(
-      int level,           // level > 0
-      const Slice& begin,  // nullptr means before all keys
-      const Slice& end,    // nullptr means after all keys
+      int level,                 // level > 0
+      const InternalKey* begin,  // nullptr means before all keys
+      const InternalKey* end,    // nullptr means after all keys
       std::vector<FileMetaData*>* inputs,
       int hint_index,                // index of overlap file
       int* file_index,               // return index of overlap file
-      bool within_interval = false)  // if set, force the inputs within interval
-      const;
+      bool within_interval = false,  // if set, force the inputs within interval
+      InternalKey** next_smallest = nullptr)  // if non-null, returns the
+      const;  // smallest key of next file not included
 
   void ExtendFileRangeOverlappingInterval(
       int level,
-      const Slice& begin,  // nullptr means before all keys
-      const Slice& end,    // nullptr means after all keys
-      unsigned int index,  // start extending from this index
-      int* startIndex,     // return the startIndex of input range
-      int* endIndex)       // return the endIndex of input range
+      const InternalKey* begin,  // nullptr means before all keys
+      const InternalKey* end,    // nullptr means after all keys
+      unsigned int index,        // start extending from this index
+      int* startIndex,           // return the startIndex of input range
+      int* endIndex)             // return the endIndex of input range
       const;
 
   void ExtendFileRangeWithinInterval(
       int level,
-      const Slice& begin,  // nullptr means before all keys
-      const Slice& end,    // nullptr means after all keys
-      unsigned int index,  // start extending from this index
-      int* startIndex,     // return the startIndex of input range
-      int* endIndex)       // return the endIndex of input range
+      const InternalKey* begin,  // nullptr means before all keys
+      const InternalKey* end,    // nullptr means after all keys
+      unsigned int index,        // start extending from this index
+      int* startIndex,           // return the startIndex of input range
+      int* endIndex)             // return the endIndex of input range
       const;
 
   // Returns true iff some file in the specified level overlaps
@@ -306,6 +309,7 @@ class VersionStorageInfo {
   }
 
   int base_level() const { return base_level_; }
+  double level_multiplier() const { return level_multiplier_; }
 
   // REQUIRES: lock is held
   // Set the index that is used to offset into files_by_compaction_pri_ to find
@@ -431,6 +435,8 @@ class VersionStorageInfo {
   // Level that L0 data should be compacted to. All levels < base_level_ should
   // be empty. -1 if it is not level-compaction so it's not applicable.
   int base_level_;
+
+  double level_multiplier_;
 
   // A list for the same set of files that are stored in files_,
   // but files in each level are now sorted based on file
@@ -728,6 +734,10 @@ struct ObsoleteFileInfo {
   }
 };
 
+namespace {
+class BaseReferencedVersionBuilder;
+}
+
 class VersionSet {
  public:
   VersionSet(const std::string& dbname, const ImmutableDBOptions* db_options,
@@ -748,9 +758,15 @@ class VersionSet {
       InstrumentedMutex* mu, Directory* db_directory = nullptr,
       bool new_descriptor_log = false,
       const ColumnFamilyOptions* column_family_options = nullptr) {
+    autovector<ColumnFamilyData*> cfds;
+    cfds.emplace_back(column_family_data);
+    autovector<const MutableCFOptions*> mutable_cf_options_list;
+    mutable_cf_options_list.emplace_back(&mutable_cf_options);
+    autovector<autovector<VersionEdit*>> edit_lists;
     autovector<VersionEdit*> edit_list;
-    edit_list.push_back(edit);
-    return LogAndApply(column_family_data, mutable_cf_options, edit_list, mu,
+    edit_list.emplace_back(edit);
+    edit_lists.emplace_back(edit_list);
+    return LogAndApply(cfds, mutable_cf_options_list, edit_lists, mu,
                        db_directory, new_descriptor_log, column_family_options);
   }
   // The batch version. If edit_list.size() > 1, caller must ensure that
@@ -760,7 +776,27 @@ class VersionSet {
       const MutableCFOptions& mutable_cf_options,
       const autovector<VersionEdit*>& edit_list, InstrumentedMutex* mu,
       Directory* db_directory = nullptr, bool new_descriptor_log = false,
-      const ColumnFamilyOptions* column_family_options = nullptr);
+      const ColumnFamilyOptions* column_family_options = nullptr) {
+    autovector<ColumnFamilyData*> cfds;
+    cfds.emplace_back(column_family_data);
+    autovector<const MutableCFOptions*> mutable_cf_options_list;
+    mutable_cf_options_list.emplace_back(&mutable_cf_options);
+    autovector<autovector<VersionEdit*>> edit_lists;
+    edit_lists.emplace_back(edit_list);
+    return LogAndApply(cfds, mutable_cf_options_list, edit_lists, mu,
+                       db_directory, new_descriptor_log, column_family_options);
+  }
+
+  // The across-multi-cf batch version. If edit_lists contain more than
+  // 1 version edits, caller must ensure that no edit in the []list is column
+  // family manipulation.
+  Status LogAndApply(
+      const autovector<ColumnFamilyData*>& cfds,
+      const autovector<const MutableCFOptions*>& mutable_cf_options_list,
+      const autovector<autovector<VersionEdit*>>& edit_lists,
+      InstrumentedMutex* mu, Directory* db_directory = nullptr,
+      bool new_descriptor_log = false,
+      const ColumnFamilyOptions* new_cf_options = nullptr);
 
   // Recover the last saved descriptor from persistent storage.
   // If read_only == true, Recover() will not complain if some column families
@@ -811,6 +847,11 @@ class VersionSet {
 
   // Allocate and return a new file number
   uint64_t NewFileNumber() { return next_file_number_.fetch_add(1); }
+
+  // Fetch And Add n new file number
+  uint64_t FetchAddFileNumber(uint64_t n) {
+    return next_file_number_.fetch_add(n);
+  }
 
   // Return the last sequence number.
   uint64_t LastSequence() const {
@@ -964,6 +1005,21 @@ class VersionSet {
 
   ColumnFamilyData* CreateColumnFamily(const ColumnFamilyOptions& cf_options,
                                        VersionEdit* edit);
+
+  Status ApplyOneVersionEdit(
+      VersionEdit& edit,
+      const std::unordered_map<std::string, ColumnFamilyOptions>& name_to_opts,
+      std::unordered_map<int, std::string>& column_families_not_found,
+      std::unordered_map<uint32_t, BaseReferencedVersionBuilder*>& builders,
+      bool* have_log_number, uint64_t* log_number, bool* have_prev_log_number,
+      uint64_t* previous_log_number, bool* have_next_file, uint64_t* next_file,
+      bool* have_last_sequence, SequenceNumber* last_sequence,
+      uint64_t* min_log_number_to_keep, uint32_t* max_column_family);
+
+  Status ProcessManifestWrites(std::deque<ManifestWriter>& writers,
+                               InstrumentedMutex* mu, Directory* db_directory,
+                               bool new_descriptor_log,
+                               const ColumnFamilyOptions* new_cf_options);
 
   std::unique_ptr<ColumnFamilySet> column_family_set_;
 
