@@ -408,9 +408,9 @@ class VersionStorageInfo {
   // @param last_level Level after which we check for overlap
   // @param last_l0_idx If `last_level == 0`, index of L0 file after which we
   //    check for overlap; otherwise, must be -1
-  bool RangeMightExistAfterSortedRun(const Slice& smallest_key,
-                                     const Slice& largest_key, int last_level,
-                                     int last_l0_idx);
+  bool RangeMightExistAfterSortedRun(const Slice& smallest_user_key,
+                                     const Slice& largest_user_key,
+                                     int last_level, int last_l0_idx);
 
  private:
   const InternalKeyComparator* internal_comparator_;
@@ -567,9 +567,10 @@ class Version {
   // REQUIRES: lock is not held
   void Get(const ReadOptions&, const LookupKey& key, PinnableSlice* value,
            Status* status, MergeContext* merge_context,
-           RangeDelAggregator* range_del_agg, bool* value_found = nullptr,
-           bool* key_exists = nullptr, SequenceNumber* seq = nullptr,
-           ReadCallback* callback = nullptr, bool* is_blob = nullptr);
+           SequenceNumber* max_covering_tombstone_seq,
+           bool* value_found = nullptr, bool* key_exists = nullptr,
+           SequenceNumber* seq = nullptr, ReadCallback* callback = nullptr,
+           bool* is_blob = nullptr);
 
   // Loads some stats information from files. Call without mutex held. It needs
   // to be called before applying the version to the version set.

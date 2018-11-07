@@ -1278,6 +1278,13 @@ TEST_P(BlockBasedTableTest, RangeDelBlock) {
   std::vector<std::string> keys = {"1pika", "2chu"};
   std::vector<std::string> vals = {"p", "c"};
 
+  std::vector<RangeTombstone> expected_tombstones = {
+      {"1pika", "2chu", 0},
+      {"2chu", "c", 1},
+      {"2chu", "c", 0},
+      {"c", "p", 0},
+  };
+
   for (int i = 0; i < 2; i++) {
     RangeTombstone t(keys[i], vals[i], i);
     std::pair<InternalKey, Slice> p = t.Serialize();
@@ -1310,14 +1317,15 @@ TEST_P(BlockBasedTableTest, RangeDelBlock) {
     ASSERT_FALSE(iter->Valid());
     iter->SeekToFirst();
     ASSERT_TRUE(iter->Valid());
-    for (int i = 0; i < 2; i++) {
+    for (size_t i = 0; i < expected_tombstones.size(); i++) {
       ASSERT_TRUE(iter->Valid());
       ParsedInternalKey parsed_key;
       ASSERT_TRUE(ParseInternalKey(iter->key(), &parsed_key));
       RangeTombstone t(parsed_key, iter->value());
-      ASSERT_EQ(t.start_key_, keys[i]);
-      ASSERT_EQ(t.end_key_, vals[i]);
-      ASSERT_EQ(t.seq_, i);
+      const auto& expected_t = expected_tombstones[i];
+      ASSERT_EQ(t.start_key_, expected_t.start_key_);
+      ASSERT_EQ(t.end_key_, expected_t.end_key_);
+      ASSERT_EQ(t.seq_, expected_t.seq_);
       iter->Next();
     }
     ASSERT_TRUE(!iter->Valid());
@@ -2478,14 +2486,14 @@ TEST_P(BlockBasedTableTest, BlockCacheLeak) {
 }
 
 namespace {
-class CustomCacheAllocator : public CacheAllocator {
+class CustomMemoryAllocator : public MemoryAllocator {
  public:
-  virtual const char* Name() const override { return "CustomCacheAllocator"; }
+  virtual const char* Name() const override { return "CustomMemoryAllocator"; }
 
   void* Allocate(size_t size) override {
     ++numAllocations;
     auto ptr = new char[size + 16];
-    memcpy(ptr, "cache_allocator_", 16);  // mangle first 16 bytes
+    memcpy(ptr, "memory_allocator_", 16);  // mangle first 16 bytes
     return reinterpret_cast<void*>(ptr + 16);
   }
   void Deallocate(void* p) override {
@@ -2499,8 +2507,8 @@ class CustomCacheAllocator : public CacheAllocator {
 };
 }  // namespace
 
-TEST_P(BlockBasedTableTest, CacheAllocator) {
-  auto custom_cache_allocator = std::make_shared<CustomCacheAllocator>();
+TEST_P(BlockBasedTableTest, MemoryAllocator) {
+  auto custom_memory_allocator = std::make_shared<CustomMemoryAllocator>();
   {
     Options opt;
     unique_ptr<InternalKeyComparator> ikc;
@@ -2509,7 +2517,7 @@ TEST_P(BlockBasedTableTest, CacheAllocator) {
     BlockBasedTableOptions table_options;
     table_options.block_size = 1024;
     LRUCacheOptions lruOptions;
-    lruOptions.cache_allocator = custom_cache_allocator;
+    lruOptions.memory_allocator = custom_memory_allocator;
     lruOptions.capacity = 16 * 1024 * 1024;
     lruOptions.num_shard_bits = 4;
     table_options.block_cache = NewLRUCache(std::move(lruOptions));
@@ -2543,10 +2551,10 @@ TEST_P(BlockBasedTableTest, CacheAllocator) {
 
   // out of scope, block cache should have been deleted, all allocations
   // deallocated
-  EXPECT_EQ(custom_cache_allocator->numAllocations.load(),
-            custom_cache_allocator->numDeallocations.load());
+  EXPECT_EQ(custom_memory_allocator->numAllocations.load(),
+            custom_memory_allocator->numDeallocations.load());
   // make sure that allocations actually happened through the cache allocator
-  EXPECT_GT(custom_cache_allocator->numAllocations.load(), 0);
+  EXPECT_GT(custom_memory_allocator->numAllocations.load(), 0);
 }
 
 TEST_P(BlockBasedTableTest, NewIndexIteratorLeak) {
@@ -2730,9 +2738,9 @@ static void DoCompressionTest(CompressionType comp) {
   ASSERT_TRUE(Between(c.ApproximateOffsetOf("abc"),       0,      0));
   ASSERT_TRUE(Between(c.ApproximateOffsetOf("k01"),       0,      0));
   ASSERT_TRUE(Between(c.ApproximateOffsetOf("k02"),       0,      0));
-  ASSERT_TRUE(Between(c.ApproximateOffsetOf("k03"),    2000,   3000));
-  ASSERT_TRUE(Between(c.ApproximateOffsetOf("k04"),    2000,   3000));
-  ASSERT_TRUE(Between(c.ApproximateOffsetOf("xyz"),    4000,   6100));
+  ASSERT_TRUE(Between(c.ApproximateOffsetOf("k03"),    2000,   3500));
+  ASSERT_TRUE(Between(c.ApproximateOffsetOf("k04"),    2000,   3500));
+  ASSERT_TRUE(Between(c.ApproximateOffsetOf("xyz"),    4000,   6500));
   c.ResetTableReader();
 }
 
@@ -2990,6 +2998,26 @@ TEST_F(HarnessTest, FooterTests) {
     decoded_footer.DecodeFrom(&encoded_slice);
     ASSERT_EQ(decoded_footer.table_magic_number(), kBlockBasedTableMagicNumber);
     ASSERT_EQ(decoded_footer.checksum(), kxxHash);
+    ASSERT_EQ(decoded_footer.metaindex_handle().offset(), meta_index.offset());
+    ASSERT_EQ(decoded_footer.metaindex_handle().size(), meta_index.size());
+    ASSERT_EQ(decoded_footer.index_handle().offset(), index.offset());
+    ASSERT_EQ(decoded_footer.index_handle().size(), index.size());
+    ASSERT_EQ(decoded_footer.version(), 1U);
+  }
+  {
+    // xxhash64 block based
+    std::string encoded;
+    Footer footer(kBlockBasedTableMagicNumber, 1);
+    BlockHandle meta_index(10, 5), index(20, 15);
+    footer.set_metaindex_handle(meta_index);
+    footer.set_index_handle(index);
+    footer.set_checksum(kxxHash64);
+    footer.EncodeTo(&encoded);
+    Footer decoded_footer;
+    Slice encoded_slice(encoded);
+    decoded_footer.DecodeFrom(&encoded_slice);
+    ASSERT_EQ(decoded_footer.table_magic_number(), kBlockBasedTableMagicNumber);
+    ASSERT_EQ(decoded_footer.checksum(), kxxHash64);
     ASSERT_EQ(decoded_footer.metaindex_handle().offset(), meta_index.offset());
     ASSERT_EQ(decoded_footer.metaindex_handle().size(), meta_index.size());
     ASSERT_EQ(decoded_footer.index_handle().offset(), index.offset());

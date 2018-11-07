@@ -115,12 +115,15 @@ struct TraceStats {
       top_k_qps_sec;
   std::list<TraceUnit> time_series;
   std::vector<std::pair<uint64_t, uint64_t>> correlation_output;
+  std::map<uint32_t, uint64_t> uni_key_num;
 
   std::unique_ptr<rocksdb::WritableFile> time_series_f;
   std::unique_ptr<rocksdb::WritableFile> a_key_f;
   std::unique_ptr<rocksdb::WritableFile> a_count_dist_f;
   std::unique_ptr<rocksdb::WritableFile> a_prefix_cut_f;
   std::unique_ptr<rocksdb::WritableFile> a_value_size_f;
+  std::unique_ptr<rocksdb::WritableFile> a_key_size_f;
+  std::unique_ptr<rocksdb::WritableFile> a_key_num_f;
   std::unique_ptr<rocksdb::WritableFile> a_qps_f;
   std::unique_ptr<rocksdb::WritableFile> a_top_qps_prefix_f;
   std::unique_ptr<rocksdb::WritableFile> w_key_f;
@@ -140,6 +143,7 @@ struct TypeUnit {
   uint64_t total_keys;
   uint64_t total_access;
   uint64_t total_succ_access;
+  uint32_t sample_count;
   std::map<uint32_t, TraceStats> stats;
   TypeUnit() = default;
   ~TypeUnit() = default;
@@ -159,6 +163,7 @@ struct CfUnit {
   std::map<uint32_t, std::pair<uint32_t, uint64_t>> ave_iter_len_sec;
   std::unique_ptr<rocksdb::WritableFile> iter_len_dist_f;
   std::unique_ptr<rocksdb::WritableFile> ave_iter_len_sec_f;
+  std::map<uint32_t, uint32_t> cf_qps;
 };
 
 class TraceAnalyzer {
@@ -214,8 +219,11 @@ class TraceAnalyzer {
   uint64_t begin_time_;
   uint64_t end_time_;
   uint64_t time_series_start_;
+  uint32_t sample_max_;
+  uint32_t cur_time_sec_;
   std::unique_ptr<rocksdb::WritableFile> trace_sequence_f_;  // readable trace
   std::unique_ptr<rocksdb::WritableFile> qps_f_;             // overall qps
+  std::unique_ptr<rocksdb::WritableFile> cf_qps_f_;  // The qps of each CF>
   std::unique_ptr<rocksdb::SequentialFile> wkey_input_f_;
   std::vector<TypeUnit> ta_;  // The main statistic collecting data structure
   std::map<uint32_t, CfUnit> cfs_;  // All the cf_id appears in this trace;

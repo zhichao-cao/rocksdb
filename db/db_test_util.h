@@ -675,6 +675,7 @@ class DBTestBase : public testing::Test {
     kBlockBasedTableWithPartitionedIndexFormat4,
     kPartitionedFilterWithNewTableReaderForCompactions,
     kUniversalSubcompactions,
+    kxxHash64Checksum,
     // This must be the last line
     kEnd,
   };
@@ -746,6 +747,9 @@ class DBTestBase : public testing::Test {
   // Jump from kDefault to kFilter to kFullFilter
   bool ChangeFilterOptions();
 
+  // Switch between different DB options for file ingestion tests.
+  bool ChangeOptionsForFileIngestionTest();
+
   // Return the current option configuration.
   Options CurrentOptions(const anon::OptionsOverride& options_override =
                              anon::OptionsOverride()) const;
@@ -798,6 +802,8 @@ class DBTestBase : public testing::Test {
   bool IsMemoryMappedAccessSupported() const;
 
   Status Flush(int cf = 0);
+
+  Status Flush(const std::vector<int>& cf_ids);
 
   Status Put(const Slice& k, const Slice& v, WriteOptions wo = WriteOptions());
 

@@ -1,9 +1,12 @@
 # Rocksdb Change Log
 ## Unreleased
 ### New Features
-* Introduced `CacheAllocator`, which lets the user specify custom allocator for memory in block cache.
+* Introduced `Memoryllocator`, which lets the user specify custom allocator for memory in block cache.
 * Introduced `PerfContextByLevel` as part of `PerfContext` which allows storing perf context at each level. Also replaced `__thread` with `thread_local` keyword for perf_context.
 * With level_compaction_dynamic_level_bytes = true, level multiplier may be adjusted automatically when Level 0 to 1 compaction is lagged behind.
+* Introduced DB option `atomic_flush`. If true, RocksDB supports flushing multiple column families and atomically committing the result to MANIFEST. Useful when WAL is disabled.
+* Added `num_deletions` and `num_merge_operands` members to `TableProperties`.
+* Added "rocksdb.min-obsolete-sst-number-to-keep" DB property that reports the lower bound on SST file numbers that are being kept from deletion, even if the SSTs are obsolete.
 
 ### Bug Fixes
 * Fix corner case where a write group leader blocked due to write stall blocks other writers in queue with WriteOptions::no_slowdown set.
@@ -11,6 +14,13 @@
 * Properly set the stop key for a truncated manual CompactRange
 * Fix slow flush/compaction when DB contains many snapshots. The problem became noticeable to us in DBs with 100,000+ snapshots, though it will affect others at different thresholds.
 * Fix the bug that WriteBatchWithIndex's SeekForPrev() doesn't see the entries with the same key.
+* Fix the bug where user comparator was sometimes fed with InternalKey instead of the user key. The bug manifests when during GenerateBottommostFiles.
+* Fix a bug in WritePrepared txns where if the number of old snapshots goes beyond the snapshot cache size (128 default) the rest will not be checked when evicting a commit entry from the commit cache.
+
+## 5.17.1 (10/30/2018)
+## Unreleased
+### New Features
+* Add xxhash64 checksum support
 
 ## 5.17.0 (10/05/2018)
 ### Public API Change

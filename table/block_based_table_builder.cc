@@ -39,10 +39,10 @@
 #include "table/full_filter_block.h"
 #include "table/table_builder.h"
 
-#include "util/cache_allocator.h"
 #include "util/coding.h"
 #include "util/compression.h"
 #include "util/crc32c.h"
+#include "util/memory_allocator.h"
 #include "util/stop_watch.h"
 #include "util/string_util.h"
 #include "util/xxhash.h"
@@ -450,6 +450,11 @@ void BlockBasedTableBuilder::Add(const Slice& key, const Slice& value) {
     r->props.num_entries++;
     r->props.raw_key_size += key.size();
     r->props.raw_value_size += value.size();
+    if (value_type == kTypeDeletion || value_type == kTypeSingleDeletion) {
+      r->props.num_deletions++;
+    } else if (value_type == kTypeMerge) {
+      r->props.num_merge_operands++;
+    }
 
     r->index_builder->OnKeyAdded(key);
     NotifyCollectTableCollectorsOnAdd(key, value, r->offset,
@@ -610,6 +615,18 @@ void BlockBasedTableBuilder::WriteRawBlock(const Slice& block_contents,
         EncodeFixed32(trailer_without_type, XXH32_digest(xxh));
         break;
       }
+      case kxxHash64: {
+        XXH64_state_t* const state = XXH64_createState();
+        XXH64_reset(state, 0);
+        XXH64_update(state, block_contents.data(),
+                static_cast<uint32_t>(block_contents.size()));
+        XXH64_update(state, trailer, 1);  // Extend  to cover block type
+        EncodeFixed32(trailer_without_type,
+          static_cast<uint32_t>(XXH64_digest(state) & // lower 32 bits
+                                   uint64_t{0xffffffff}));
+        XXH64_freeState(state);
+        break;
+      }
     }
 
     assert(r->status.ok());
@@ -656,7 +673,7 @@ Status BlockBasedTableBuilder::InsertBlockInCache(const Slice& block_contents,
     size_t size = block_contents.size();
 
     auto ubuf =
-        AllocateBlock(size + 1, block_cache_compressed->cache_allocator());
+        AllocateBlock(size + 1, block_cache_compressed->memory_allocator());
     memcpy(ubuf.get(), block_contents.data(), size);
     ubuf[size] = type;
 

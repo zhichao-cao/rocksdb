@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "db/range_tombstone_fragmenter.h"
 #include "options/cf_options.h"
 #include "rocksdb/options.h"
 #include "rocksdb/persistent_cache.h"
@@ -304,7 +305,7 @@ class BlockBasedTable : public TableReader {
       BlockBasedTable::CachableEntry<Block>* block, uint32_t format_version,
       const Slice& compression_dict, size_t read_amp_bytes_per_bit,
       bool is_index = false, GetContext* get_context = nullptr,
-      CacheAllocator* allocator = nullptr);
+      MemoryAllocator* allocator = nullptr);
 
   // Put a raw block (maybe compressed) to the corresponding block caches.
   // This method will perform decompression against raw_block if needed and then
@@ -323,7 +324,7 @@ class BlockBasedTable : public TableReader {
       CachableEntry<Block>* block, Block* raw_block, uint32_t format_version,
       const Slice& compression_dict, size_t read_amp_bytes_per_bit,
       bool is_index = false, Cache::Priority pri = Cache::Priority::LOW,
-      GetContext* get_context = nullptr, CacheAllocator* allocator = nullptr);
+      GetContext* get_context = nullptr, MemoryAllocator* allocator = nullptr);
 
   // Calls (*handle_result)(arg, ...) repeatedly, starting with the entry found
   // after a call to Seek(key), until handle_result returns false.
@@ -384,6 +385,9 @@ class BlockBasedTable : public TableReader {
 
   friend class PartitionedFilterBlockReader;
   friend class PartitionedFilterBlockTest;
+
+  InternalIterator* NewUnfragmentedRangeTombstoneIterator(
+      const ReadOptions& read_options);
 };
 
 // Maitaning state of a two-level iteration on a partitioned index structure
@@ -432,7 +436,7 @@ struct BlockBasedTable::Rep {
   Rep(const ImmutableCFOptions& _ioptions, const EnvOptions& _env_options,
       const BlockBasedTableOptions& _table_opt,
       const InternalKeyComparator& _internal_comparator, bool skip_filters,
-      const bool _immortal_table)
+      int _level, const bool _immortal_table)
       : ioptions(_ioptions),
         env_options(_env_options),
         table_options(_table_opt),
@@ -445,6 +449,7 @@ struct BlockBasedTable::Rep {
         prefix_filtering(true),
         range_del_handle(BlockHandle::NullBlockHandle()),
         global_seqno(kDisableGlobalSequenceNumber),
+        level(_level),
         immortal_table(_immortal_table) {}
 
   const ImmutableCFOptions& ioptions;
@@ -510,6 +515,7 @@ struct BlockBasedTable::Rep {
   // cache is enabled.
   CachableEntry<Block> range_del_entry;
   BlockHandle range_del_handle;
+  std::shared_ptr<const FragmentedRangeTombstoneList> fragmented_range_dels;
 
   // If global_seqno is used, all Keys in this file will have the same
   // seqno with value `global_seqno`.
@@ -517,6 +523,10 @@ struct BlockBasedTable::Rep {
   // A value of kDisableGlobalSequenceNumber means that this feature is disabled
   // and every key have it's own seqno.
   SequenceNumber global_seqno;
+
+  // the level when the table is opened, could potentially change when trivial
+  // move is involved
+  int level;
 
   // If false, blocks in this file are definitely all uncompressed. Knowing this
   // before reading individual blocks enables certain optimizations.

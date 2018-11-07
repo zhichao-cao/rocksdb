@@ -102,10 +102,6 @@ OPT += -momit-leaf-frame-pointer
 endif
 endif
 
-ifeq (,$(shell $(CXX) -fsyntax-only -faligned-new -xc++ /dev/null 2>&1))
-CXXFLAGS += -faligned-new -DHAVE_ALIGNED_NEW
-endif
-
 ifeq (,$(shell $(CXX) -fsyntax-only -maltivec -xc /dev/null 2>&1))
 CXXFLAGS += -DHAS_ALTIVEC
 CFLAGS += -DHAS_ALTIVEC
@@ -534,6 +530,7 @@ TESTS = \
 	db_universal_compaction_test \
 	trace_analyzer_test \
 	repeatable_thread_test \
+	range_tombstone_fragmenter_test \
 
 PARALLEL_TEST = \
 	backupable_db_test \
@@ -884,6 +881,7 @@ crash_test: whitebox_crash_test blackbox_crash_test
 
 blackbox_crash_test: db_stress
 	python -u tools/db_crashtest.py --simple blackbox $(CRASH_TEST_EXT_ARGS)
+	python -u tools/db_crashtest.py --enable_atomic_flush blackbox $(CRASH_TEST_EXT_ARGS)
 	python -u tools/db_crashtest.py blackbox $(CRASH_TEST_EXT_ARGS)
 
 ifeq ($(CRASH_TEST_KILL_ODD),)
@@ -892,6 +890,8 @@ endif
 
 whitebox_crash_test: db_stress
 	python -u tools/db_crashtest.py --simple whitebox --random_kill_odd \
+      $(CRASH_TEST_KILL_ODD) $(CRASH_TEST_EXT_ARGS)
+	python -u tools/db_crashtest.py --enable_atomic_flush whitebox  --random_kill_odd \
       $(CRASH_TEST_KILL_ODD) $(CRASH_TEST_EXT_ARGS)
 	python -u tools/db_crashtest.py whitebox  --random_kill_odd \
       $(CRASH_TEST_KILL_ODD) $(CRASH_TEST_EXT_ARGS)
@@ -1558,6 +1558,9 @@ blob_db_test: utilities/blob_db/blob_db_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
 repeatable_thread_test: util/repeatable_thread_test.o $(LIBOBJECTS) $(TESTHARNESS)
+	$(AM_LINK)
+
+range_tombstone_fragmenter_test: db/range_tombstone_fragmenter_test.o db/db_test_util.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
 #-------------------------------------------------

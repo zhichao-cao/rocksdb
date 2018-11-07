@@ -215,7 +215,8 @@ std::map<CompactionStopStyle, std::string>
 std::unordered_map<std::string, ChecksumType>
     OptionsHelper::checksum_type_string_map = {{"kNoChecksum", kNoChecksum},
                                                {"kCRC32c", kCRC32c},
-                                               {"kxxHash", kxxHash}};
+                                               {"kxxHash", kxxHash},
+                                               {"kxxHash64", kxxHash64}};
 
 std::unordered_map<std::string, CompressionType>
     OptionsHelper::compression_type_string_map = {
@@ -1554,7 +1555,11 @@ std::unordered_map<std::string, OptionTypeInfo>
           offsetof(struct ImmutableDBOptions, manual_wal_flush)}},
         {"seq_per_batch",
          {0, OptionType::kBoolean, OptionVerificationType::kDeprecated, false,
-          0}}};
+          0}},
+        {"atomic_flush",
+         {offsetof(struct DBOptions, atomic_flush), OptionType::kBoolean,
+          OptionVerificationType::kNormal, false,
+          offsetof(struct ImmutableDBOptions, atomic_flush)}}};
 
 std::unordered_map<std::string, BlockBasedTableOptions::IndexType>
     OptionsHelper::block_base_table_index_type_string_map = {

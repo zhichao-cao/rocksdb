@@ -1177,7 +1177,7 @@ Version::Version(ColumnFamilyData* column_family_data, VersionSet* vset,
 void Version::Get(const ReadOptions& read_options, const LookupKey& k,
                   PinnableSlice* value, Status* status,
                   MergeContext* merge_context,
-                  RangeDelAggregator* range_del_agg, bool* value_found,
+                  SequenceNumber* max_covering_tombstone_seq, bool* value_found,
                   bool* key_exists, SequenceNumber* seq, ReadCallback* callback,
                   bool* is_blob) {
   Slice ikey = k.internal_key();
@@ -1194,8 +1194,8 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
   GetContext get_context(
       user_comparator(), merge_operator_, info_log_, db_statistics_,
       status->ok() ? GetContext::kNotFound : GetContext::kMerge, user_key,
-      value, value_found, merge_context, range_del_agg, this->env_, seq,
-      merge_operator_ ? &pinned_iters_mgr : nullptr, callback, is_blob);
+      value, value_found, merge_context, max_covering_tombstone_seq, this->env_,
+      seq, merge_operator_ ? &pinned_iters_mgr : nullptr, callback, is_blob);
 
   // Pin blocks that we read to hold merge operands
   if (merge_operator_) {
@@ -1209,6 +1209,11 @@ void Version::Get(const ReadOptions& read_options, const LookupKey& k,
   FdWithKeyRange* f = fp.GetNextFile();
 
   while (f != nullptr) {
+    if (*max_covering_tombstone_seq > 0) {
+      // Use empty error message for speed
+      *status = Status::NotFound();
+      return;
+    }
     if (get_context.sample()) {
       sample_file_read_inc(f->file_metadata);
     }
@@ -1336,7 +1341,7 @@ bool Version::MaybeInitializeFileMetaData(FileMetaData* file_meta) {
   }
   if (tp.get() == nullptr) return false;
   file_meta->num_entries = tp->num_entries;
-  file_meta->num_deletions = GetDeletedKeys(tp->user_collected_properties);
+  file_meta->num_deletions = tp->num_deletions;
   file_meta->raw_value_size = tp->raw_value_size;
   file_meta->raw_key_size = tp->raw_key_size;
 
@@ -1975,7 +1980,9 @@ void VersionStorageInfo::GenerateBottommostFiles() {
       } else {
         l0_file_idx = -1;
       }
-      if (!RangeMightExistAfterSortedRun(f.smallest_key, f.largest_key,
+      Slice smallest_user_key = ExtractUserKey(f.smallest_key);
+      Slice largest_user_key = ExtractUserKey(f.largest_key);
+      if (!RangeMightExistAfterSortedRun(smallest_user_key, largest_user_key,
                                          static_cast<int>(level),
                                          l0_file_idx)) {
         bottommost_files_.emplace_back(static_cast<int>(level),
@@ -2640,8 +2647,8 @@ uint64_t VersionStorageInfo::EstimateLiveDataSize() const {
 }
 
 bool VersionStorageInfo::RangeMightExistAfterSortedRun(
-    const Slice& smallest_key, const Slice& largest_key, int last_level,
-    int last_l0_idx) {
+    const Slice& smallest_user_key, const Slice& largest_user_key,
+    int last_level, int last_l0_idx) {
   assert((last_l0_idx != -1) == (last_level == 0));
   // TODO(ajkr): this preserves earlier behavior where we considered an L0 file
   // bottommost only if it's the oldest L0 file and there are no files on older
@@ -2663,7 +2670,7 @@ bool VersionStorageInfo::RangeMightExistAfterSortedRun(
     // which overlap with [`smallest_key`, `largest_key`].
     if (files_[level].size() > 0 &&
         (last_level == 0 ||
-         OverlapInLevel(level, &smallest_key, &largest_key))) {
+         OverlapInLevel(level, &smallest_user_key, &largest_user_key))) {
       return true;
     }
   }
@@ -3467,14 +3474,21 @@ Status VersionSet::Recover(
       if (edit.is_in_atomic_group_) {
         if (replay_buffer.empty()) {
           replay_buffer.resize(edit.remaining_entries_ + 1);
+          TEST_SYNC_POINT_CALLBACK("VersionSet::Recover:FirstInAtomicGroup",
+                                   &edit);
         }
         ++num_entries_decoded;
         if (num_entries_decoded + edit.remaining_entries_ !=
             static_cast<uint32_t>(replay_buffer.size())) {
-          return Status::Corruption("corrupted atomic group");
+          TEST_SYNC_POINT_CALLBACK(
+              "VersionSet::Recover:IncorrectAtomicGroupSize", &edit);
+          s = Status::Corruption("corrupted atomic group");
+          break;
         }
         replay_buffer[num_entries_decoded - 1] = std::move(edit);
         if (num_entries_decoded == replay_buffer.size()) {
+          TEST_SYNC_POINT_CALLBACK("VersionSet::Recover:LastInAtomicGroup",
+                                   &edit);
           for (auto& e : replay_buffer) {
             s = ApplyOneVersionEdit(
                 e, cf_name_to_options, column_families_not_found, builders,
@@ -3489,9 +3503,13 @@ Status VersionSet::Recover(
           replay_buffer.clear();
           num_entries_decoded = 0;
         }
+        TEST_SYNC_POINT("VersionSet::Recover:AtomicGroup");
       } else {
         if (!replay_buffer.empty()) {
-          return Status::Corruption("corrupted atomic group");
+          TEST_SYNC_POINT_CALLBACK(
+              "VersionSet::Recover:AtomicGroupMixedWithNormalEdits", &edit);
+          s = Status::Corruption("corrupted atomic group");
+          break;
         }
         s = ApplyOneVersionEdit(
             edit, cf_name_to_options, column_families_not_found, builders,

@@ -12,7 +12,9 @@
 #include "port/port.h"
 #include "rocksdb/experimental.h"
 #include "rocksdb/utilities/convenience.h"
+#include "util/fault_injection_test_env.h"
 #include "util/sync_point.h"
+
 namespace rocksdb {
 
 // SYNC_POINT is not supported in released Windows mode.
@@ -2953,6 +2955,12 @@ TEST_F(DBCompactionTest, SuggestCompactRangeNoTwoLevel0Compactions) {
   dbfull()->TEST_WaitForCompact();
 }
 
+static std::string ShortKey(int i) {
+  assert(i < 10000);
+  char buf[100];
+  snprintf(buf, sizeof(buf), "key%04d", i);
+  return std::string(buf);
+}
 
 TEST_P(DBCompactionTestWithParam, ForceBottommostLevelCompaction) {
   int32_t trivial_move = 0;
@@ -2965,10 +2973,28 @@ TEST_P(DBCompactionTestWithParam, ForceBottommostLevelCompaction) {
       [&](void* /*arg*/) { non_trivial_move++; });
   rocksdb::SyncPoint::GetInstance()->EnableProcessing();
 
+  // The key size is guaranteed to be <= 8
+  class ShortKeyComparator : public Comparator {
+    int Compare(const rocksdb::Slice& a,
+                const rocksdb::Slice& b) const override {
+      assert(a.size() <= 8);
+      assert(b.size() <= 8);
+      return BytewiseComparator()->Compare(a, b);
+    }
+    const char* Name() const override { return "ShortKeyComparator"; }
+    void FindShortestSeparator(std::string* start,
+                               const rocksdb::Slice& limit) const override {
+      return BytewiseComparator()->FindShortestSeparator(start, limit);
+    }
+    void FindShortSuccessor(std::string* key) const override {
+      return BytewiseComparator()->FindShortSuccessor(key);
+    }
+  } short_key_cmp;
   Options options = CurrentOptions();
   options.target_file_size_base = 100000000;
   options.write_buffer_size = 100000000;
   options.max_subcompactions = max_subcompactions_;
+  options.comparator = &short_key_cmp;
   DestroyAndReopen(options);
 
   int32_t value_size = 10 * 1024;  // 10 KB
@@ -2978,7 +3004,7 @@ TEST_P(DBCompactionTestWithParam, ForceBottommostLevelCompaction) {
   // File with keys [ 0 => 99 ]
   for (int i = 0; i < 100; i++) {
     values.push_back(RandomString(&rnd, value_size));
-    ASSERT_OK(Put(Key(i), values[i]));
+    ASSERT_OK(Put(ShortKey(i), values[i]));
   }
   ASSERT_OK(Flush());
 
@@ -2995,7 +3021,7 @@ TEST_P(DBCompactionTestWithParam, ForceBottommostLevelCompaction) {
   // File with keys [ 100 => 199 ]
   for (int i = 100; i < 200; i++) {
     values.push_back(RandomString(&rnd, value_size));
-    ASSERT_OK(Put(Key(i), values[i]));
+    ASSERT_OK(Put(ShortKey(i), values[i]));
   }
   ASSERT_OK(Flush());
 
@@ -3013,7 +3039,7 @@ TEST_P(DBCompactionTestWithParam, ForceBottommostLevelCompaction) {
   // File with keys [ 200 => 299 ]
   for (int i = 200; i < 300; i++) {
     values.push_back(RandomString(&rnd, value_size));
-    ASSERT_OK(Put(Key(i), values[i]));
+    ASSERT_OK(Put(ShortKey(i), values[i]));
   }
   ASSERT_OK(Flush());
 
@@ -3031,7 +3057,7 @@ TEST_P(DBCompactionTestWithParam, ForceBottommostLevelCompaction) {
   ASSERT_EQ(non_trivial_move, 0);
 
   for (int i = 0; i < 300; i++) {
-    ASSERT_EQ(Get(Key(i)), values[i]);
+    ASSERT_EQ(Get(ShortKey(i)), values[i]);
   }
 
   rocksdb::SyncPoint::GetInstance()->DisableProcessing();
@@ -4003,6 +4029,46 @@ TEST_F(DBCompactionTest, PartialManualCompaction) {
   CompactRangeOptions cro;
   cro.bottommost_level_compaction = BottommostLevelCompaction::kForce;
   dbfull()->CompactRange(cro, nullptr, nullptr);
+}
+
+TEST_F(DBCompactionTest, ManualCompactionFailsInReadOnlyMode) {
+  // Regression test for bug where manual compaction hangs forever when the DB
+  // is in read-only mode. Verify it now at least returns, despite failing.
+  const int kNumL0Files = 4;
+  std::unique_ptr<FaultInjectionTestEnv> mock_env(
+      new FaultInjectionTestEnv(Env::Default()));
+  Options opts = CurrentOptions();
+  opts.disable_auto_compactions = true;
+  opts.env = mock_env.get();
+  DestroyAndReopen(opts);
+
+  Random rnd(301);
+  for (int i = 0; i < kNumL0Files; ++i) {
+    // Make sure files are overlapping in key-range to prevent trivial move.
+    Put("key1", RandomString(&rnd, 1024));
+    Put("key2", RandomString(&rnd, 1024));
+    Flush();
+  }
+  ASSERT_EQ(kNumL0Files, NumTableFilesAtLevel(0));
+
+  // Enter read-only mode by failing a write.
+  mock_env->SetFilesystemActive(false);
+  // Make sure this is outside `CompactRange`'s range so that it doesn't fail
+  // early trying to flush memtable.
+  ASSERT_NOK(Put("key3", RandomString(&rnd, 1024)));
+
+  // In the bug scenario, the first manual compaction would fail and forget to
+  // unregister itself, causing the second one to hang forever due to conflict
+  // with a non-running compaction.
+  CompactRangeOptions cro;
+  cro.exclusive_manual_compaction = false;
+  Slice begin_key("key1");
+  Slice end_key("key2");
+  ASSERT_NOK(dbfull()->CompactRange(cro, &begin_key, &end_key));
+  ASSERT_NOK(dbfull()->CompactRange(cro, &begin_key, &end_key));
+
+  // Close before mock_env destruct.
+  Close();
 }
 
 #endif // !defined(ROCKSDB_LITE)

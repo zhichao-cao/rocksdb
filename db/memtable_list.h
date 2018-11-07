@@ -55,17 +55,19 @@ class MemTableListVersion {
   // will be stored in *seq on success (regardless of whether true/false is
   // returned).  Otherwise, *seq will be set to kMaxSequenceNumber.
   bool Get(const LookupKey& key, std::string* value, Status* s,
-           MergeContext* merge_context, RangeDelAggregator* range_del_agg,
-           SequenceNumber* seq, const ReadOptions& read_opts,
-           ReadCallback* callback = nullptr, bool* is_blob_index = nullptr);
+           MergeContext* merge_context,
+           SequenceNumber* max_covering_tombstone_seq, SequenceNumber* seq,
+           const ReadOptions& read_opts, ReadCallback* callback = nullptr,
+           bool* is_blob_index = nullptr);
 
   bool Get(const LookupKey& key, std::string* value, Status* s,
-           MergeContext* merge_context, RangeDelAggregator* range_del_agg,
+           MergeContext* merge_context,
+           SequenceNumber* max_covering_tombstone_seq,
            const ReadOptions& read_opts, ReadCallback* callback = nullptr,
            bool* is_blob_index = nullptr) {
     SequenceNumber seq;
-    return Get(key, value, s, merge_context, range_del_agg, &seq, read_opts,
-               callback, is_blob_index);
+    return Get(key, value, s, merge_context, max_covering_tombstone_seq, &seq,
+               read_opts, callback, is_blob_index);
   }
 
   // Similar to Get(), but searches the Memtable history of memtables that
@@ -74,17 +76,18 @@ class MemTableListVersion {
   // writes that are also present in the SST files.
   bool GetFromHistory(const LookupKey& key, std::string* value, Status* s,
                       MergeContext* merge_context,
-                      RangeDelAggregator* range_del_agg, SequenceNumber* seq,
-                      const ReadOptions& read_opts,
+                      SequenceNumber* max_covering_tombstone_seq,
+                      SequenceNumber* seq, const ReadOptions& read_opts,
                       bool* is_blob_index = nullptr);
   bool GetFromHistory(const LookupKey& key, std::string* value, Status* s,
                       MergeContext* merge_context,
-                      RangeDelAggregator* range_del_agg,
+                      SequenceNumber* max_covering_tombstone_seq,
                       const ReadOptions& read_opts,
                       bool* is_blob_index = nullptr) {
     SequenceNumber seq;
-    return GetFromHistory(key, value, s, merge_context, range_del_agg, &seq,
-                          read_opts, is_blob_index);
+    return GetFromHistory(key, value, s, merge_context,
+                          max_covering_tombstone_seq, &seq, read_opts,
+                          is_blob_index);
   }
 
   Status AddRangeTombstoneIterators(const ReadOptions& read_opts, Arena* arena,
@@ -123,8 +126,8 @@ class MemTableListVersion {
 
   bool GetFromList(std::list<MemTable*>* list, const LookupKey& key,
                    std::string* value, Status* s, MergeContext* merge_context,
-                   RangeDelAggregator* range_del_agg, SequenceNumber* seq,
-                   const ReadOptions& read_opts,
+                   SequenceNumber* max_covering_tombstone_seq,
+                   SequenceNumber* seq, const ReadOptions& read_opts,
                    ReadCallback* callback = nullptr,
                    bool* is_blob_index = nullptr);
 
@@ -278,6 +281,21 @@ class MemTableList {
       return 0;
     }
     return memlist.front()->GetID();
+  }
+
+  void AssignAtomicFlushSeq(const SequenceNumber& seq) {
+    const auto& memlist = current_->memlist_;
+    // Scan the memtable list from new to old
+    for (auto it = memlist.begin(); it != memlist.end(); ++it) {
+      MemTable* mem = *it;
+      if (mem->atomic_flush_seqno_ == kMaxSequenceNumber) {
+        mem->atomic_flush_seqno_ = seq;
+      } else {
+        // Earlier memtables must have been assigned a atomic flush seq, no
+        // need to continue scan.
+        break;
+      }
+    }
   }
 
  private:
