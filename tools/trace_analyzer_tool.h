@@ -164,6 +164,7 @@ struct CfUnit {
   std::map<uint32_t, std::pair<uint32_t, uint64_t>> ave_iter_len_sec;
   std::unique_ptr<rocksdb::WritableFile> iter_len_dist_f;
   std::unique_ptr<rocksdb::WritableFile> ave_iter_len_sec_f;
+  std::map<uint64_t, std::vector<uint64_t>> correlation_dist;
 };
 
 class TraceAnalyzer {
