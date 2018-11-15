@@ -160,6 +160,7 @@ struct CfUnit {
   std::map<uint64_t, uint64_t> w_key_size_stats;  // whole key space key size
                                                   // statistic this cf
   std::map<uint32_t, uint32_t> cf_qps;
+  std::map<uint64_t, std::vector<uint64_t>> correlation_dist;
 };
 
 class TraceAnalyzer {

@@ -161,6 +161,11 @@ DEFINE_int32(value_interval, 8,
 DEFINE_double(sample_ratio, 1.0,
               "If the trace size is extremely huge or user want to sample "
               "the trace when analyzing, sample ratio can be set (0, 1.0]");
+DEFINE_int32(correlation_interval, -1,
+             "(us) Toget the distribution of time interval between two "
+             "queries, user can specify the time interval for analyze. For "
+             "example, if interval sets to 10, the output is the number of "
+             "paired queries that have interval between 0-10, 11-20...");
 
 namespace rocksdb {
 
@@ -1137,6 +1142,51 @@ Status TraceAnalyzer::ReProcessing() {
         }
       }
     }
+
+    // Output the interval distribution of two queries to the same key
+    if (FLAGS_correlation_interval > 0) {
+      std::string cf_name = std::to_string(cf_id);
+      for (int correlation = 0;
+           correlation <
+           static_cast<int>(analyzer_opts_.correlation_list.size());
+           correlation++) {
+        std::string q1 =
+            taIndexToOpt[analyzer_opts_.correlation_list[correlation].first]
+                .c_str();
+        std::string q2 =
+            taIndexToOpt[analyzer_opts_.correlation_list[correlation].second]
+                .c_str();
+        std::string file_name = output_path_ + "/" + FLAGS_output_prefix + "-" +
+                                cf_name + "-" + q1 + "-" + q2 +
+                                "-time_interval_distribution.txt";
+        std::unique_ptr<rocksdb::WritableFile> tmp_f;
+        s = env_->NewWritableFile(file_name, &tmp_f, env_options_);
+        if (!s.ok()) {
+          fprintf(stderr, "Cannot open file: %s\n", file_name.c_str());
+          exit(1);
+        }
+
+        for (auto& co_it : cf_it.second.correlation_dist) {
+          uint64_t end_t = (co_it.first + 1) *
+                           static_cast<uint64_t>(FLAGS_correlation_interval);
+          if (static_cast<int>(co_it.second.size()) > correlation) {
+            ret = sprintf(buffer_, "%" PRIu64 " %" PRIu64 "\n", end_t,
+                          co_it.second[correlation]);
+            if (ret < 0) {
+              return Status::IOError("Format the output failed");
+            }
+            std::string printout(buffer_);
+            s = tmp_f->Append(printout);
+            if (!s.ok()) {
+              fprintf(stderr,
+                      "Write correlated query time interval distribution file "
+                      "failed\n");
+              return s;
+            }
+          }
+        }
+      }
+    }
   }
   return Status::OK();
 }
@@ -1342,6 +1392,21 @@ Status TraceAnalyzer::StatsUnitCorrelationUpdate(StatsUnit& unit,
     unit.v_correlation[correlation_id].count++;
     unit.v_correlation[correlation_id].total_ts +=
         (ts - ta_[type_first].stats[unit.cf_id].a_key_stats[key].latest_ts);
+
+    // if the time interval is set > 0, we need to collect the distribution
+    if (FLAGS_correlation_interval > 0) {
+      uint64_t interval =
+          (ts - ta_[type_first].stats[unit.cf_id].a_key_stats[key].latest_ts) /
+          (static_cast<uint32_t>(FLAGS_correlation_interval));
+      auto interval_found = cfs_[unit.cf_id].correlation_dist.find(interval);
+      if (interval_found == cfs_[unit.cf_id].correlation_dist.end()) {
+        std::vector<uint64_t> tmp_v(unit.v_correlation.size(), 0);
+        tmp_v[correlation_id]++;
+        cfs_[unit.cf_id].correlation_dist[interval] = tmp_v;
+      } else {
+        interval_found->second[correlation_id]++;
+      }
+    }
   }
 
   unit.latest_ts = ts;
