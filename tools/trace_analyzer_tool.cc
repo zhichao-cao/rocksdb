@@ -1223,7 +1223,8 @@ Status TraceAnalyzer::ReProcessing() {
         for (auto& co_it : cf_it.second.correlation_dist) {
           uint64_t end_t = (co_it.first + 1) *
                            static_cast<uint64_t>(FLAGS_correlation_interval);
-          if (static_cast<int>(co_it.second.size()) > correlation) {
+          if (static_cast<int>(co_it.second.size()) > correlation &&
+              co_it.second[correlation] != 0) {
             ret = sprintf(buffer_, "%" PRIu64 " %" PRIu64 "\n", end_t,
                           co_it.second[correlation]);
             if (ret < 0) {
