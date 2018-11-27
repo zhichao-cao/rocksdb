@@ -151,6 +151,9 @@ DEFINE_int32(print_top_k_access, 1,
              "<top K of the variables to be printed> "
              "Print the top k accessed keys, top k accessed prefix "
              "and etc.");
+DEFINE_int32(select_cf, -1,
+             "Select one CF to analyze instead all the CFs, indicate the "
+             "cf id.");
 DEFINE_int32(output_ignore_count, 0,
              "<threshold>, ignores the access count <= this value, "
              "it will shorter the output.");
@@ -1589,6 +1592,10 @@ Status TraceAnalyzer::HandleGet(uint32_t column_family_id,
       return Status::Corruption("Failed to write the trace sequence to file");
     }
   }
+  if (FLAGS_select_cf >= 0 &&
+      static_cast<int32_t>(column_family_id) != FLAGS_select_cf) {
+    return Status::OK();
+  }
 
   if (ta_[TraceOperationType::kGet].sample_count >= sample_max_) {
     ta_[TraceOperationType::kGet].sample_count = 0;
@@ -1625,6 +1632,10 @@ Status TraceAnalyzer::HandlePut(uint32_t column_family_id, const Slice& key,
       return Status::Corruption("Failed to write the trace sequence to file");
     }
   }
+  if (FLAGS_select_cf >= 0 &&
+      static_cast<int32_t>(column_family_id) != FLAGS_select_cf) {
+    return Status::OK();
+  }
 
   if (ta_[TraceOperationType::kPut].sample_count >= sample_max_) {
     ta_[TraceOperationType::kPut].sample_count = 0;
@@ -1658,6 +1669,10 @@ Status TraceAnalyzer::HandleDelete(uint32_t column_family_id,
       return Status::Corruption("Failed to write the trace sequence to file");
     }
   }
+  if (FLAGS_select_cf >= 0 &&
+      static_cast<int32_t>(column_family_id) != FLAGS_select_cf) {
+    return Status::OK();
+  }
 
   if (ta_[TraceOperationType::kDelete].sample_count >= sample_max_) {
     ta_[TraceOperationType::kDelete].sample_count = 0;
@@ -1690,6 +1705,10 @@ Status TraceAnalyzer::HandleSingleDelete(uint32_t column_family_id,
     if (!s.ok()) {
       return Status::Corruption("Failed to write the trace sequence to file");
     }
+  }
+  if (FLAGS_select_cf >= 0 &&
+      static_cast<int32_t>(column_family_id) != FLAGS_select_cf) {
+    return Status::OK();
   }
 
   if (ta_[TraceOperationType::kSingleDelete].sample_count >= sample_max_) {
@@ -1725,6 +1744,10 @@ Status TraceAnalyzer::HandleDeleteRange(uint32_t column_family_id,
       return Status::Corruption("Failed to write the trace sequence to file");
     }
   }
+  if (FLAGS_select_cf >= 0 &&
+      static_cast<int32_t>(column_family_id) != FLAGS_select_cf) {
+    return Status::OK();
+  }
 
   if (ta_[TraceOperationType::kRangeDelete].sample_count >= sample_max_) {
     ta_[TraceOperationType::kRangeDelete].sample_count = 0;
@@ -1759,6 +1782,10 @@ Status TraceAnalyzer::HandleMerge(uint32_t column_family_id, const Slice& key,
     if (!s.ok()) {
       return Status::Corruption("Failed to write the trace sequence to file");
     }
+  }
+  if (FLAGS_select_cf >= 0 &&
+      static_cast<int32_t>(column_family_id) != FLAGS_select_cf) {
+    return Status::OK();
   }
 
   if (ta_[TraceOperationType::kMerge].sample_count >= sample_max_) {
@@ -1798,14 +1825,16 @@ Status TraceAnalyzer::HandleIter(uint32_t column_family_id,
   if (type == -1) {
     return s;
   }
-
   if (FLAGS_convert_to_human_readable_trace && trace_sequence_f_) {
     s = WriteTraceSequence(type, column_family_id, key, value_size, ts);
     if (!s.ok()) {
       return Status::Corruption("Failed to write the trace sequence to file");
     }
   }
-
+  if (FLAGS_select_cf >= 0 &&
+      static_cast<int32_t>(column_family_id) != FLAGS_select_cf) {
+    return Status::OK();
+  }
   if (ta_[type].sample_count >= sample_max_) {
     ta_[type].sample_count = 0;
   }
