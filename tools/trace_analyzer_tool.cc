@@ -1024,14 +1024,17 @@ Status TraceAnalyzer::ReProcessing() {
           continue;
         }
         while (!stat.time_series.empty()) {
-          uint64_t key_id = 0;
+          uint64_t key_id = 0, a_count = 0, key_size = 1, value_size = 0;
           auto found = stat.a_key_stats.find(stat.time_series.front().key);
           if (found != stat.a_key_stats.end()) {
             key_id = found->second.key_id;
+            a_count = found->second.access_count;
+            key_size = stat.time_series.front().key.size();
+            value_size = found->second.value_size;
           }
-          ret = sprintf(buffer_, "%u %" PRIu64 " %" PRIu64 "\n",
+          ret = sprintf(buffer_, "%u %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 " %" PRIu64 "\n",
                         stat.time_series.front().type,
-                        stat.time_series.front().ts, key_id);
+                        stat.time_series.front().ts, key_id, a_count, key_size, value_size);
           if (ret < 0) {
             return Status::IOError("Format the output failed");
           }
