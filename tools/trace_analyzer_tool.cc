@@ -166,6 +166,8 @@ DEFINE_int32(correlation_interval, -1,
              "queries, user can specify the time interval for analyze. For "
              "example, if interval sets to 10, the output is the number of "
              "paired queries that have interval between 0-10, 11-20...");
+DEFINE_bool(get_put_interval, false,
+            "The get after get and put after put analyze");
 
 namespace rocksdb {
 
@@ -1242,6 +1244,37 @@ Status TraceAnalyzer::ReProcessing() {
         }
       }
     }
+
+    if (FLAGS_get_put_interval) {
+      std::string cf_name = std::to_string(cf_id);
+      std::string file_name = output_path_ + "/" + FLAGS_output_prefix + "-" +
+                              cf_name + "-get-after-get-pure-interval.txt";
+      std::unique_ptr<rocksdb::WritableFile> tmp_f;
+      s = env_->NewWritableFile(file_name, &tmp_f, env_options_);
+      if (!s.ok()) {
+        fprintf(stderr, "Cannot open file: %s\n", file_name.c_str());
+        exit(1);
+      }
+      printf("get %" PRIu64 " Put %" PRIu64 "\n",
+             cf_it.second.get_put.gg_key_count,
+             cf_it.second.get_put.pp_key_count);
+      for (auto& co_it : cf_it.second.get_put.get_after_get) {
+        uint64_t end_t = (co_it.first + 1) * 10;
+        ret =
+            sprintf(buffer_, "%" PRIu64 " %" PRIu64 "\n", end_t, co_it.second);
+        if (ret < 0) {
+          return Status::IOError("Format the output failed");
+        }
+        std::string printout(buffer_);
+        s = tmp_f->Append(printout);
+        if (!s.ok()) {
+          fprintf(stderr,
+                  "Write correlated query time interval distribution file "
+                  "failed\n");
+          return s;
+        }
+      }
+    }
   }
   return Status::OK();
 }
@@ -1406,8 +1439,81 @@ Status TraceAnalyzer::KeyStatsInsertion(const uint32_t& type,
     ta_[type].stats[cf_id].time_series.push_back(trace_u);
   }
 
+  if (FLAGS_get_put_interval &&
+      (type == TraceOperationType::kGet || type == TraceOperationType::kPut)) {
+    GetPutInterval(type, cf_id, key, ts);
+  }
+
   return Status::OK();
 }
+
+Status TraceAnalyzer::GetPutInterval(const uint32_t& type,
+                                     const uint32_t& cf_id,
+                                     const std::string& key,
+                                     const uint64_t ts) {
+  auto found = cfs_[cf_id].get_put.get_get.find(key);
+  if (found == cfs_[cf_id].get_put.get_get.end()) {
+    cfs_[cf_id].get_put.get_get[key].last_opt = type;
+    cfs_[cf_id].get_put.get_get[key].last_ts = ts;
+    cfs_[cf_id].get_put.get_get[key].get_watch = 0;
+    cfs_[cf_id].get_put.get_get[key].put_watch = 0;
+    cfs_[cf_id].get_put.get_get[key].get_appear = false;
+    cfs_[cf_id].get_put.get_get[key].put_appear = false;
+    if (type == TraceOperationType::kGet) {
+      cfs_[cf_id].get_put.gg_key_count++;
+    } else if (type == TraceOperationType::kPut) {
+      cfs_[cf_id].get_put.pp_key_count++;
+    }
+  } else {
+    if (type == TraceOperationType::kGet) {
+      if (found->second.last_opt == TraceOperationType::kGet) {
+        uint64_t diff = (ts - found->second.last_ts) / 10;
+        found->second.get_watch = diff;
+        cfs_[cf_id].get_put.get_after_get[diff]++;
+        found->second.last_opt = type;
+        found->second.last_ts = ts;
+      } else if (found->second.last_opt == TraceOperationType::kPut) {
+        /*
+        if (found->second.get_watch > 0 &&
+            cfs_[cf_id].get_put.get_after_get.find(found->second.get_watch) !=
+                cfs_[cf_id].get_put.get_after_get.end()) {
+          if (cfs_[cf_id].get_put.get_after_get[found->second.get_watch] > 0) {
+            cfs_[cf_id].get_put.get_after_get[found->second.get_watch]--;
+          }
+        }
+        */
+        found->second.get_watch = 0;
+        found->second.last_opt = type;
+        found->second.last_ts = ts;
+      }
+    } else if (type == TraceOperationType::kPut) {
+      cfs_[cf_id].get_put.pp_key_count++;
+      if (found->second.last_opt == TraceOperationType::kPut) {
+        // uint64_t interval = 10;
+        found->second.get_watch = 0;
+        /*
+        uint64_t tmp_ts = found->second.get_list.end()->second;
+        found->second.get_list.push_back(
+            std::make_pair(TraceOperationType::kGet, tmp_ts));
+            */
+      } else {
+
+        if (found->second.get_watch > 0 && ts - found->second.last_ts < 10000 &&
+            cfs_[cf_id].get_put.get_after_get.find(found->second.get_watch) !=
+                cfs_[cf_id].get_put.get_after_get.end()) {
+          if (cfs_[cf_id].get_put.get_after_get[found->second.get_watch] >
+              0) {
+            cfs_[cf_id].get_put.get_after_get[found->second.get_watch]--;
+          }
+        }
+        found->second.get_watch = 0;
+      }
+      found->second.last_opt = type;
+      found->second.last_ts = ts;
+    }
+  }
+  return Status::OK();
+}  // namespace rocksdb
 
 // Initialize the CF level statistic unit
 Status TraceAnalyzer::InitCFS(const uint32_t& cf_id) {
@@ -1415,6 +1521,9 @@ Status TraceAnalyzer::InitCFS(const uint32_t& cf_id) {
     return Status::OK();
   }
   cfs_[cf_id].cf_id = cf_id;
+  cfs_[cf_id].get_put.cf_id = cf_id;
+  cfs_[cf_id].get_put.gg_key_count = 0;
+  cfs_[cf_id].get_put.pp_key_count = 0;
   cfs_[cf_id].w_count = 0;
   cfs_[cf_id].a_count = 0;
   if (FLAGS_analyze_iterator) {

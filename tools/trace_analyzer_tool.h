@@ -153,7 +153,26 @@ struct TypeUnit {
   TypeUnit& operator=(TypeUnit&&) = default;
 };
 
+struct GPkey {
+  uint32_t last_opt;
+  uint64_t last_ts;
+  uint64_t get_watch;
+  uint64_t put_watch;
+  bool get_appear;
+  bool put_appear;
+};
+
+struct GPstate {
+  uint32_t cf_id;
+  std::map<uint64_t, uint64_t> get_after_get;
+  std::map<uint64_t, uint64_t> put_after_put;
+  std::map<std::string, GPkey> get_get;
+  uint64_t gg_key_count;
+  uint64_t pp_key_count;
+};
+
 struct CfUnit {
+  GPstate get_put;
   uint32_t cf_id;
   uint64_t w_count;  // total keys in this cf if we use the whole key space
   uint64_t a_count;  // the total keys in this cf that are accessed
@@ -237,6 +256,8 @@ class TraceAnalyzer {
   Status KeyStatsInsertion(const uint32_t& type, const uint32_t& cf_id,
                            const std::string& key, const size_t value_size,
                            const uint64_t ts);
+  Status GetPutInterval(const uint32_t& type, const uint32_t& cf_id,
+                        const std::string& key, const uint64_t ts);
   Status InitCFS(const uint32_t& cf_id);
   Status StatsUnitCorrelationUpdate(StatsUnit& unit, const uint32_t& type,
                                     const uint64_t& ts, const std::string& key);
