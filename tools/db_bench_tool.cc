@@ -46,6 +46,7 @@
 #include "rocksdb/db.h"
 #include "rocksdb/env.h"
 #include "rocksdb/filter_policy.h"
+#include "rocksdb/iostats_context.h"
 #include "rocksdb/memtablerep.h"
 #include "rocksdb/options.h"
 #include "rocksdb/perf_context.h"
@@ -864,6 +865,8 @@ DEFINE_int32(thread_status_per_interval, 0,
              " when this is greater than 0.");
 
 DEFINE_int32(perf_level, rocksdb::PerfLevel::kDisable, "Level of perf collection");
+
+DEFINE_bool(iostats_context, false, "Enable the iostats_context statistics. ");
 
 static bool ValidateRateLimit(const char* flagname, double value) {
   const double EPSILON = 1e-10;
@@ -6140,7 +6143,18 @@ void VerifyDBFromDB(std::string& truth_db_name) {
 
   void Replay(ThreadState* thread) {
     if (db_.db != nullptr) {
+      if (FLAGS_iostats_context) {
+        rocksdb::get_iostats_context()->Reset();
+      }
       Replay(thread, &db_);
+      if (FLAGS_perf_level > rocksdb::PerfLevel::kDisable) {
+        thread->stats.AddMessage(std::string("PERF_CONTEXT:\n") +
+           get_perf_context()->ToString());
+      }
+      if (FLAGS_iostats_context) {
+        thread->stats.AddMessage(std::string("IOSTATS_CONTEXT:\n") +
+            get_iostats_context()->ToString());
+      }
     }
   }
 
