@@ -88,17 +88,31 @@ class Replayer {
   ~Replayer();
 
   Status Replay();
+  Status MultiThreadReplay(uint32_t threads_num);
   Status SetFastForward(uint32_t fast_forward);
 
  private:
   Status ReadHeader(Trace* header);
   Status ReadFooter(Trace* footer);
   Status ReadTrace(Trace* trace);
+  static void BGWorkGet(void* arg);
+  static void BGWorkWriteBatch(void* arg);
+  static void BGWorkIterSeek(void* arg);
+  static void BGWorkIterSeekForPrev(void* arg);
 
   DBImpl* db_;
+  Env* env_;
   std::unique_ptr<TraceReader> trace_reader_;
   std::unordered_map<uint32_t, ColumnFamilyHandle*> cf_map_;
   uint32_t fast_forward_;
+};
+
+struct ReplayerWorkerArg {
+  DB* db;
+  Trace trace_entry;
+  std::unordered_map<uint32_t, ColumnFamilyHandle*>* cf_map;
+  WriteOptions woptions;
+  ReadOptions roptions;
 };
 
 }  // namespace rocksdb
