@@ -28,6 +28,7 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+#include <set>
 
 #include "db/db_impl/db_impl.h"
 #include "db/malloc_stats.h"
@@ -4902,6 +4903,12 @@ class Benchmark {
     }
 
     Duration duration(FLAGS_duration, reads_);
+
+    if (FLAGS_iostats_context) {
+        rocksdb::get_iostats_context()->Reset();
+    }
+
+    //std::set<int64_t> key_stat;
     while (!duration.Done(1)) {
       DBWithColumnFamilies* db_with_cfh = SelectDBWithCfh(thread);
       int64_t rand_v, key_rand, key_seed;
@@ -4910,6 +4917,7 @@ class Benchmark {
       key_seed = PowerCdfInversion(u, FLAGS_key_dist_a, FLAGS_key_dist_b);
       Random64 rand(key_seed);
       key_rand = static_cast<int64_t>(rand.Next()) % FLAGS_num;
+      //key_stat.insert(key_rand);
       GenerateKeyFromInt(key_rand, FLAGS_num, &key);
       int query_type = query.GetType(rand_v);
 
@@ -5034,9 +5042,19 @@ class Benchmark {
     thread->stats.AddMessage(msg);
 
     if (FLAGS_perf_level > rocksdb::PerfLevel::kDisable) {
-      thread->stats.AddMessage(std::string("PERF_CONTEXT:\n") +
+      thread->stats.AddMessage(std::string("\nPERF_CONTEXT:\n") +
                                get_perf_context()->ToString());
     }
+    if (FLAGS_iostats_context) {
+      thread->stats.AddMessage(std::string("\nIOSTATS_CONTEXT:\n") +
+                             get_iostats_context()->ToString());
+    }
+    /*
+    long tmp_size = static_cast<long>(key_stat.size());
+    std::string ukey_size = std::to_string(tmp_size);
+    thread->stats.AddMessage(std::string("\nTotal_uqniue_keys: \n") +
+                             ukey_size);
+                             */
   }
 
   void IteratorCreation(ThreadState* thread) {
