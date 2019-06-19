@@ -775,6 +775,8 @@ DEFINE_string(trace_file, "", "Trace workload to a file. ");
 
 DEFINE_int32(trace_replay_fast_forward, 1,
              "Fast forward trace replay, must >= 1. ");
+DEFINE_bool(distribute_hot_keys, false,
+            "distribute hot keys to whole key space.  ");
 
 static enum rocksdb::CompressionType StringToCompressionType(const char* ctype) {
   assert(ctype);
@@ -3935,7 +3937,21 @@ class Benchmark {
   }
 
   void WriteRandom(ThreadState* thread) {
+    if (FLAGS_iostats_context) {
+      rocksdb::get_iostats_context()->Reset();
+    }
+
     DoWrite(thread, RANDOM);
+
+    if (FLAGS_perf_level > rocksdb::PerfLevel::kDisable) {
+      thread->stats.AddMessage(std::string("PERF_CONTEXT:\n") +
+          get_perf_context()->ToString());
+    }
+    if (FLAGS_iostats_context) {
+      thread->stats.AddMessage(std::string("IOSTATS_CONTEXT:\n") +
+          get_iostats_context()->ToString());
+    }
+
   }
 
   void WriteUniqueRandom(ThreadState* thread) {
@@ -4914,9 +4930,13 @@ class Benchmark {
       int64_t rand_v, key_rand, key_seed;
       rand_v = GetRandomKey(&thread->rand) % FLAGS_num;
       double u = static_cast<double>(rand_v) / FLAGS_num;
-      key_seed = PowerCdfInversion(u, FLAGS_key_dist_a, FLAGS_key_dist_b);
-      Random64 rand(key_seed);
-      key_rand = static_cast<int64_t>(rand.Next()) % FLAGS_num;
+      if (FLAGS_distribute_hot_keys) {
+        key_seed = PowerCdfInversion(u, FLAGS_key_dist_a, FLAGS_key_dist_b);
+        Random64 rand(key_seed);
+        key_rand = static_cast<int64_t>(rand.Next()) % FLAGS_num;
+      } else {
+        key_rand = PowerCdfInversion(u, FLAGS_key_dist_a, FLAGS_key_dist_b);
+      }
       //key_stat.insert(key_rand);
       GenerateKeyFromInt(key_rand, FLAGS_num, &key);
       int query_type = query.GetType(rand_v);
