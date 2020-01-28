@@ -13,6 +13,7 @@
 #include "port/port.h"
 #include "rocksdb/env.h"
 #include "rocksdb/file_system.h"
+#include "rocksdb/io_status.h"
 #include "rocksdb/listener.h"
 #include "rocksdb/rate_limiter.h"
 #include "test_util/sync_point.h"
@@ -34,11 +35,11 @@ class WritableFileWriter {
   void NotifyOnFileWriteFinish(uint64_t offset, size_t length,
                                const FileOperationInfo::TimePoint& start_ts,
                                const FileOperationInfo::TimePoint& finish_ts,
-                               const Status& status) {
+                               const IOStatus& iostatus) {
     FileOperationInfo info(file_name_, start_ts, finish_ts);
     info.offset = offset;
     info.length = length;
-    info.status = status;
+    info.status = iostatus;
 
     for (auto& listener : listeners_) {
       listener->OnFileWriteFinish(info);
@@ -114,24 +115,24 @@ class WritableFileWriter {
 
   std::string file_name() const { return file_name_; }
 
-  Status Append(const Slice& data);
+  IOStatus Append(const Slice& data);
 
-  Status Pad(const size_t pad_bytes);
+  IOStatus Pad(const size_t pad_bytes);
 
-  Status Flush();
+  IOStatus Flush();
 
-  Status Close();
+  IOStatus Close();
 
-  Status Sync(bool use_fsync);
+  IOStatus Sync(bool use_fsync);
 
   // Sync only the data that was already Flush()ed. Safe to call concurrently
   // with Append() and Flush(). If !writable_file_->IsSyncThreadSafe(),
   // returns NotSupported status.
-  Status SyncWithoutFlush(bool use_fsync);
+  IOStatus SyncWithoutFlush(bool use_fsync);
 
   uint64_t GetFileSize() const { return filesize_; }
 
-  Status InvalidateCache(size_t offset, size_t length) {
+  IOStatus InvalidateCache(size_t offset, size_t length) {
     return writable_file_->InvalidateCache(offset, length);
   }
 
@@ -145,11 +146,11 @@ class WritableFileWriter {
   // Used when os buffering is OFF and we are writing
   // DMA such as in Direct I/O mode
 #ifndef ROCKSDB_LITE
-  Status WriteDirect();
+  IOStatus WriteDirect();
 #endif  // !ROCKSDB_LITE
   // Normal write
-  Status WriteBuffered(const char* data, size_t size);
-  Status RangeSync(uint64_t offset, uint64_t nbytes);
-  Status SyncInternal(bool use_fsync);
+  IOStatus WriteBuffered(const char* data, size_t size);
+  IOStatus RangeSync(uint64_t offset, uint64_t nbytes);
+  IOStatus SyncInternal(bool use_fsync);
 };
 }  // namespace rocksdb
