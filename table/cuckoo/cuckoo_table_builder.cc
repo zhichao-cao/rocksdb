@@ -83,17 +83,18 @@ CuckooTableBuilder::CuckooTableBuilder(
 
 void CuckooTableBuilder::Add(const Slice& key, const Slice& value) {
   if (num_entries_ >= kMaxVectorIdx - 1) {
-    status_ = Status::NotSupported("Number of keys in a file must be < 2^32-1");
+    io_status_ =
+        IOStatus::NotSupported("Number of keys in a file must be < 2^32-1");
     return;
   }
   ParsedInternalKey ikey;
   if (!ParseInternalKey(key, &ikey)) {
-    status_ = Status::Corruption("Unable to parse key into inernal key.");
+    io_status_ = IOStatus::Corruption("Unable to parse key into inernal key.");
     return;
   }
   if (ikey.type != kTypeDeletion && ikey.type != kTypeValue) {
-    status_ = Status::NotSupported("Unsupported key type " +
-                                   ToString(ikey.type));
+    io_status_ =
+        IOStatus::NotSupported("Unsupported key type " + ToString(ikey.type));
     return;
   }
 
@@ -109,7 +110,7 @@ void CuckooTableBuilder::Add(const Slice& key, const Slice& value) {
     key_size_ = is_last_level_file_ ? ikey.user_key.size() : key.size();
   }
   if (key_size_ != (is_last_level_file_ ? ikey.user_key.size() : key.size())) {
-    status_ = Status::NotSupported("all keys have to be the same size");
+    io_status_ = IOStatus::NotSupported("all keys have to be the same size");
     return;
   }
 
@@ -119,7 +120,8 @@ void CuckooTableBuilder::Add(const Slice& key, const Slice& value) {
       value_size_ = value.size();
     }
     if (value_size_ != value.size()) {
-      status_ = Status::NotSupported("all values have to be the same size");
+      io_status_ =
+          IOStatus::NotSupported("all values have to be the same size");
       return;
     }
 
@@ -240,11 +242,10 @@ Status CuckooTableBuilder::MakeHashTable(std::vector<CuckooBucket>* buckets) {
   return Status::OK();
 }
 
-Status CuckooTableBuilder::Finish() {
+IOStatus CuckooTableBuilder::Finish() {
   assert(!closed_);
   closed_ = true;
   std::vector<CuckooBucket> buckets;
-  Status s;
   std::string unused_bucket;
   if (num_entries_ > 0) {
     // Calculate the real hash size if module hash is enabled.
@@ -252,9 +253,9 @@ Status CuckooTableBuilder::Finish() {
       hash_table_size_ =
         static_cast<uint64_t>(num_entries_ / max_hash_table_ratio_);
     }
-    s = MakeHashTable(&buckets);
-    if (!s.ok()) {
-      return s;
+    io_status_ = status_to_io_status(MakeHashTable(&buckets));
+    if (!io_status_.ok()) {
+      return io_status_;
     }
     // Determine unused_user_key to fill empty buckets.
     std::string unused_user_key = smallest_user_key_;
@@ -279,7 +280,7 @@ Status CuckooTableBuilder::Finish() {
       }
     }
     if (curr_pos < 0) {
-      return Status::Corruption("Unable to find unused key");
+      return IOStatus::Corruption("Unable to find unused key");
     }
     if (is_last_level_file_) {
       unused_bucket = unused_user_key;
@@ -301,18 +302,18 @@ Status CuckooTableBuilder::Finish() {
   uint32_t num_added = 0;
   for (auto& bucket : buckets) {
     if (bucket.vector_idx == kMaxVectorIdx) {
-      s = file_->Append(Slice(unused_bucket));
+      io_status_ = file_->Append(Slice(unused_bucket));
     } else {
       ++num_added;
-      s = file_->Append(GetKey(bucket.vector_idx));
-      if (s.ok()) {
+      io_status_ = file_->Append(GetKey(bucket.vector_idx));
+      if (io_status_.ok()) {
         if (value_size_ > 0) {
-          s = file_->Append(GetValue(bucket.vector_idx));
+          io_status_ = file_->Append(GetValue(bucket.vector_idx));
         }
       }
     }
-    if (!s.ok()) {
-      return s;
+    if (!io_status_.ok()) {
+      return io_status_;
     }
   }
   assert(num_added == NumEntries());
@@ -364,10 +365,10 @@ Status CuckooTableBuilder::Finish() {
   BlockHandle property_block_handle;
   property_block_handle.set_offset(offset);
   property_block_handle.set_size(property_block.size());
-  s = file_->Append(property_block);
+  io_status_ = file_->Append(property_block);
   offset += property_block.size();
-  if (!s.ok()) {
-    return s;
+  if (!io_status_.ok()) {
+    return io_status_;
   }
 
   meta_index_builder.Add(kPropertiesBlock, property_block_handle);
@@ -376,9 +377,9 @@ Status CuckooTableBuilder::Finish() {
   BlockHandle meta_index_block_handle;
   meta_index_block_handle.set_offset(offset);
   meta_index_block_handle.set_size(meta_index_block.size());
-  s = file_->Append(meta_index_block);
-  if (!s.ok()) {
-    return s;
+  io_status_ = file_->Append(meta_index_block);
+  if (!io_status_.ok()) {
+    return io_status_;
   }
 
   Footer footer(kCuckooTableMagicNumber, 1);
@@ -386,8 +387,8 @@ Status CuckooTableBuilder::Finish() {
   footer.set_index_handle(BlockHandle::NullBlockHandle());
   std::string footer_encoding;
   footer.EncodeTo(&footer_encoding);
-  s = file_->Append(footer_encoding);
-  return s;
+  io_status_ = file_->Append(footer_encoding);
+  return io_status_;
 }
 
 void CuckooTableBuilder::Abandon() {

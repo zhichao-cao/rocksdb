@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
+#include "env/composite_env_wrapper.h"
 #include "rocksdb/options.h"
 #include "rocksdb/status.h"
 #include "rocksdb/table.h"
@@ -63,7 +64,7 @@ class PlainTableBuilder: public TableBuilder {
   // Finish building the table.  Stops using the file passed to the
   // constructor after this function returns.
   // REQUIRES: Finish(), Abandon() have not been called
-  Status Finish() override;
+  IOStatus Finish() override;
 
   // Indicate that the contents of this builder should be abandoned.  Stops
   // using the file passed to the constructor after this function returns.
@@ -97,7 +98,7 @@ class PlainTableBuilder: public TableBuilder {
   uint64_t offset_ = 0;
   uint32_t bloom_bits_per_key_;
   size_t huge_page_tlb_size_;
-  Status status_;
+  IOStatus io_status_;
   TableProperties properties_;
   PlainTableKeyEncoder encoder_;
 

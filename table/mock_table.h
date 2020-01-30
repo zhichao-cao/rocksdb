@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 
+#include "env/composite_env_wrapper.h"
 #include "port/port.h"
 #include "rocksdb/comparator.h"
 #include "rocksdb/table.h"
@@ -137,10 +138,10 @@ class MockTableBuilder : public TableBuilder {
   // Return non-ok iff some error has been detected.
   Status status() const override { return Status::OK(); }
 
-  Status Finish() override {
+  IOStatus Finish() override {
     MutexLock lock_guard(&file_system_->mutex);
     file_system_->files.insert({id_, table_});
-    return Status::OK();
+    return IOStatus::OK();
   }
 
   void Abandon() override {}

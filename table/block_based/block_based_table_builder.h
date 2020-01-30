@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "env/composite_env_wrapper.h"
 #include "rocksdb/flush_block_policy.h"
 #include "rocksdb/listener.h"
 #include "rocksdb/options.h"
@@ -70,7 +71,7 @@ class BlockBasedTableBuilder : public TableBuilder {
   // Finish building the table.  Stops using the file passed to the
   // constructor after this function returns.
   // REQUIRES: Finish(), Abandon() have not been called
-  Status Finish() override;
+  IOStatus Finish() override;
 
   // Indicate that the contents of this builder should be abandoned.  Stops
   // using the file passed to the constructor after this function returns.
@@ -109,9 +110,9 @@ class BlockBasedTableBuilder : public TableBuilder {
   // Directly write data to the file.
   void WriteRawBlock(const Slice& data, CompressionType, BlockHandle* handle,
                      bool is_data_block = false);
-  Status InsertBlockInCache(const Slice& block_contents,
-                            const CompressionType type,
-                            const BlockHandle* handle);
+  IOStatus InsertBlockInCache(const Slice& block_contents,
+                              const CompressionType type,
+                              const BlockHandle* handle);
 
   void WriteFilterBlock(MetaIndexBuilder* meta_index_builder);
   void WriteIndexBlock(MetaIndexBuilder* meta_index_builder,

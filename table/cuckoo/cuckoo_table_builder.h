@@ -10,11 +10,12 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "env/composite_env_wrapper.h"
 #include "port/port.h"
 #include "rocksdb/status.h"
-#include "table/table_builder.h"
 #include "rocksdb/table.h"
 #include "rocksdb/table_properties.h"
+#include "table/table_builder.h"
 #include "util/autovector.h"
 
 namespace rocksdb {
@@ -43,12 +44,12 @@ class CuckooTableBuilder: public TableBuilder {
   void Add(const Slice& key, const Slice& value) override;
 
   // Return non-ok iff some error has been detected.
-  Status status() const override { return status_; }
+  Status status() const override { return io_status_; }
 
   // Finish building the table.  Stops using the file passed to the
   // constructor after this function returns.
   // REQUIRES: Finish(), Abandon() have not been called
-  Status Finish() override;
+  IOStatus Finish() override;
 
   // Indicate that the contents of this builder should be abandoned.  Stops
   // using the file passed to the constructor after this function returns.
@@ -108,7 +109,7 @@ class CuckooTableBuilder: public TableBuilder {
   uint64_t num_entries_;
   // Number of keys that contain value (non-deletion op)
   uint64_t num_values_;
-  Status status_;
+  IOStatus io_status_;
   TableProperties properties_;
   const Comparator* ucomp_;
   bool use_module_hash_;

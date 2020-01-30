@@ -138,7 +138,7 @@ class TableBuilder {
 
   // Finish building the table.
   // REQUIRES: Finish(), Abandon() have not been called
-  virtual Status Finish() = 0;
+  virtual IOStatus Finish() = 0;
 
   // Indicate that the contents of this builder should be abandoned.
   // If the caller is not going to call Finish(), it must call Abandon()
