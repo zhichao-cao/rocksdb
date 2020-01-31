@@ -33,7 +33,6 @@
 #include "db/merge_helper.h"
 #include "db/range_del_aggregator.h"
 #include "db/version_set.h"
-#include "env/composite_env_wrapper.h"
 #include "file/filename.h"
 #include "file/read_write_util.h"
 #include "file/sst_file_manager_impl.h"
@@ -1125,7 +1124,7 @@ Status CompactionJob::FinishCompactionOutputFile(
 
   // Check for iterator errors
   Status s = input_status;
-  IOStatus ios;
+  IOStatus io_s;
   auto meta = &sub_compact->current_output()->meta;
   assert(meta != nullptr);
   if (s.ok()) {
@@ -1292,32 +1291,35 @@ Status CompactionJob::FinishCompactionOutputFile(
   }
   const uint64_t current_entries = sub_compact->builder->NumEntries();
   if (s.ok()) {
-    ios = status_to_io_status(sub_compact->builder->Finish());
+    s = sub_compact->builder->Finish();
   } else {
     sub_compact->builder->Abandon();
   }
+  io_s = sub_compact->builder->io_status();
   const uint64_t current_bytes = sub_compact->builder->FileSize();
-  if (ios.ok()) {
+  if (s.ok()) {
     meta->fd.file_size = current_bytes;
   }
   sub_compact->current_output()->finished = true;
   sub_compact->total_bytes += current_bytes;
 
   // Finish and check for file errors
-  if (ios.ok()) {
+  if (s.ok()) {
     StopWatch sw(env_, stats_, COMPACTION_OUTFILE_SYNC_MICROS);
-    ios = sub_compact->outfile->Sync(db_options_.use_fsync);
+    io_s = sub_compact->outfile->Sync(db_options_.use_fsync);
   }
-  if (ios.ok()) {
-    ios = sub_compact->outfile->Close();
+  if (io_s.ok()) {
+    io_s = sub_compact->outfile->Close();
   }
   sub_compact->outfile.reset();
 
-  if (!ios.ok()) {
+  if (!io_s.ok()) {
     InstrumentedMutexLock l(db_mutex_);
-    db_error_handler_->SetBGError(ios, BackgroundErrorReason::kCompaction);
+    db_error_handler_->SetBGError(io_s, BackgroundErrorReason::kCompaction);
   }
-  s = ios;
+  if (s.ok()) {
+    s = io_s;
+  }
 
   TableProperties tp;
   if (s.ok()) {

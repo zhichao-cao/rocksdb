@@ -61,10 +61,13 @@ class PlainTableBuilder: public TableBuilder {
   // Return non-ok iff some error has been detected.
   Status status() const override;
 
+  // Return IO Status IO during table building
+  IOStatus io_status() const override;
+
   // Finish building the table.  Stops using the file passed to the
   // constructor after this function returns.
   // REQUIRES: Finish(), Abandon() have not been called
-  IOStatus Finish() override;
+  Status Finish() override;
 
   // Indicate that the contents of this builder should be abandoned.  Stops
   // using the file passed to the constructor after this function returns.
@@ -98,6 +101,7 @@ class PlainTableBuilder: public TableBuilder {
   uint64_t offset_ = 0;
   uint32_t bloom_bits_per_key_;
   size_t huge_page_tlb_size_;
+  Status status_;
   IOStatus io_status_;
   TableProperties properties_;
   PlainTableKeyEncoder encoder_;

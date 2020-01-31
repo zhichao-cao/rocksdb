@@ -21,6 +21,7 @@
 #include "test_util/sync_point.h"
 #include "util/cast_util.h"
 #include "util/concurrent_task_limiter_impl.h"
+#include "env/composite_env_wrapper.h"
 
 namespace rocksdb {
 
@@ -96,7 +97,7 @@ Status DBImpl::SyncClosedLogs(JobContext* job_context) {
     logs_to_sync.push_back(log.writer);
   }
 
-  Status s;
+  IOStatus s;
   if (!logs_to_sync.empty()) {
     mutex_.Unlock();
 
@@ -117,7 +118,7 @@ Status DBImpl::SyncClosedLogs(JobContext* job_context) {
       }
     }
     if (s.ok()) {
-      s = directories_.GetWalDir()->Fsync();
+      s = status_to_io_status(directories_.GetWalDir()->Fsync());
     }
 
     mutex_.Lock();
@@ -191,6 +192,11 @@ Status DBImpl::FlushMemTableToOutputFile(
     s = flush_job.Run(&logs_with_prep_tracker_, &file_meta);
   } else {
     flush_job.Cancel();
+  }
+
+  IOStatus io_s = flush_job.io_status();
+  if(!io_s.ok()){
+    error_handler_.SetBGError(io_s, BackgroundErrorReason::kFlush);
   }
 
   if (s.ok()) {

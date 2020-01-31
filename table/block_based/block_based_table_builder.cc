@@ -282,6 +282,7 @@ struct BlockBasedTableBuilder::Rep {
   const InternalKeyComparator& internal_comparator;
   WritableFileWriter* file;
   uint64_t offset = 0;
+  Status status;
   IOStatus io_status;
   size_t alignment;
   BlockBuilder data_block;
@@ -672,12 +673,12 @@ void BlockBasedTableBuilder::WriteBlock(const Slice& raw_block_contents,
           abort_compression = true;
           ROCKS_LOG_ERROR(r->ioptions.info_log,
                           "Decompressed block did not match raw block");
-          r->io_status = IOStatus::Corruption(
+          r->status = IOStatus::Corruption(
               "Decompressed block did not match raw block");
         }
       } else {
         // Decompression reported an error. abort.
-        r->io_status = IOStatus::Corruption("Could not decompress");
+        r->status = IOStatus::Corruption("Could not decompress");
         abort_compression = true;
       }
     }
@@ -770,9 +771,9 @@ void BlockBasedTableBuilder::WriteRawBlock(const Slice& block_contents,
         static_cast<char*>(trailer));
     r->io_status = r->file->Append(Slice(trailer, kBlockTrailerSize));
     if (r->io_status.ok()) {
-      r->io_status = InsertBlockInCache(block_contents, type, handle);
+      r->status = InsertBlockInCache(block_contents, type, handle);
     }
-    if (r->io_status.ok()) {
+    if (r->status.ok() && r->io_status.ok()) {
       r->offset += block_contents.size() + kBlockTrailerSize;
       if (r->table_options.block_align && is_data_block) {
         size_t pad_bytes =
@@ -788,7 +789,14 @@ void BlockBasedTableBuilder::WriteRawBlock(const Slice& block_contents,
   }
 }
 
-Status BlockBasedTableBuilder::status() const { return rep_->io_status; }
+Status BlockBasedTableBuilder::status() const {
+  if (!rep_->io_status.ok()) {
+    return rep_->io_status;
+  }
+  return rep_->status;
+}
+
+IOStatus BlockBasedTableBuilder::io_status() const { return rep_->io_status; }
 
 static void DeleteCachedBlockContents(const Slice& /*key*/, void* value) {
   BlockContents* bc = reinterpret_cast<BlockContents*>(value);
@@ -798,7 +806,7 @@ static void DeleteCachedBlockContents(const Slice& /*key*/, void* value) {
 //
 // Make a copy of the block contents and insert into compressed block cache
 //
-IOStatus BlockBasedTableBuilder::InsertBlockInCache(const Slice& block_contents,
+Status BlockBasedTableBuilder::InsertBlockInCache(const Slice& block_contents,
                                                     const CompressionType type,
                                                     const BlockHandle* handle) {
   Rep* r = rep_;
@@ -834,7 +842,7 @@ IOStatus BlockBasedTableBuilder::InsertBlockInCache(const Slice& block_contents,
     // Invalidate OS cache.
     r->file->InvalidateCache(static_cast<size_t>(r->offset), size);
   }
-  return IOStatus::OK();
+  return Status::OK();
 }
 
 void BlockBasedTableBuilder::WriteFilterBlock(
@@ -878,7 +886,7 @@ void BlockBasedTableBuilder::WriteIndexBlock(
     // HashIndexBuilder which is not multi-partition.
     assert(index_blocks.meta_blocks.empty());
   } else if (ok() && !index_builder_status.ok()) {
-    rep_->io_status = status_to_io_status(std::move(index_builder_status));
+    rep_->status = index_builder_status;
   }
   if (ok()) {
     for (const auto& item : index_blocks.meta_blocks) {
@@ -903,7 +911,7 @@ void BlockBasedTableBuilder::WriteIndexBlock(
   while (ok() && s.IsIncomplete()) {
     s = rep_->index_builder->Finish(&index_blocks, *index_block_handle);
     if (!s.ok() && !s.IsIncomplete()) {
-      rep_->io_status = status_to_io_status(std::move(s));
+      rep_->status = s;
       return;
     }
     if (rep_->table_options.enable_index_compression) {
@@ -1126,7 +1134,7 @@ void BlockBasedTableBuilder::EnterUnbuffered() {
   r->data_block_and_keys_buffers.clear();
 }
 
-IOStatus BlockBasedTableBuilder::Finish() {
+Status BlockBasedTableBuilder::Finish() {
   Rep* r = rep_;
   assert(r->state != Rep::State::kClosed);
   bool empty_data_block = r->data_block.empty();
@@ -1164,8 +1172,7 @@ IOStatus BlockBasedTableBuilder::Finish() {
   if (ok()) {
     WriteFooter(metaindex_block_handle, index_block_handle);
   }
-  r->state = Rep::State::kClosed;
-  return r->io_status;
+  return status();
 }
 
 void BlockBasedTableBuilder::Abandon() {

@@ -184,9 +184,16 @@ void PlainTableBuilder::Add(const Slice& key, const Slice& value) {
       key, value, offset_, table_properties_collectors_, ioptions_.info_log);
 }
 
-Status PlainTableBuilder::status() const { return io_status_; }
+Status PlainTableBuilder::status() const {
+  if (!io_status_.ok()) {
+    return io_status_;
+  }
+  return status_;
+}
 
-IOStatus PlainTableBuilder::Finish() {
+IOStatus PlainTableBuilder::io_status() const { return io_status_; }
+
+Status PlainTableBuilder::Finish() {
   assert(!closed_);
   closed_ = true;
 
@@ -283,7 +290,7 @@ IOStatus PlainTableBuilder::Finish() {
     offset_ += footer_encoding.size();
   }
 
-  return io_status_;
+  return status();
 }
 
 void PlainTableBuilder::Abandon() {

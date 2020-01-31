@@ -138,10 +138,13 @@ class MockTableBuilder : public TableBuilder {
   // Return non-ok iff some error has been detected.
   Status status() const override { return Status::OK(); }
 
-  IOStatus Finish() override {
+  // Return the IO Status of table building
+  IOStatus io_status() const override { return IOStatus::OK(); }
+
+  Status Finish() override {
     MutexLock lock_guard(&file_system_->mutex);
     file_system_->files.insert({id_, table_});
-    return IOStatus::OK();
+    return Status::OK();
   }
 
   void Abandon() override {}

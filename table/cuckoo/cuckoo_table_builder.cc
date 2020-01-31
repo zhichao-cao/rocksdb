@@ -83,18 +83,18 @@ CuckooTableBuilder::CuckooTableBuilder(
 
 void CuckooTableBuilder::Add(const Slice& key, const Slice& value) {
   if (num_entries_ >= kMaxVectorIdx - 1) {
-    io_status_ =
-        IOStatus::NotSupported("Number of keys in a file must be < 2^32-1");
+    status_ =
+        Status::NotSupported("Number of keys in a file must be < 2^32-1");
     return;
   }
   ParsedInternalKey ikey;
   if (!ParseInternalKey(key, &ikey)) {
-    io_status_ = IOStatus::Corruption("Unable to parse key into inernal key.");
+    status_ = Status::Corruption("Unable to parse key into inernal key.");
     return;
   }
   if (ikey.type != kTypeDeletion && ikey.type != kTypeValue) {
-    io_status_ =
-        IOStatus::NotSupported("Unsupported key type " + ToString(ikey.type));
+    status_ =
+        Status::NotSupported("Unsupported key type " + ToString(ikey.type));
     return;
   }
 
@@ -110,7 +110,7 @@ void CuckooTableBuilder::Add(const Slice& key, const Slice& value) {
     key_size_ = is_last_level_file_ ? ikey.user_key.size() : key.size();
   }
   if (key_size_ != (is_last_level_file_ ? ikey.user_key.size() : key.size())) {
-    io_status_ = IOStatus::NotSupported("all keys have to be the same size");
+    status_ = Status::NotSupported("all keys have to be the same size");
     return;
   }
 
@@ -120,8 +120,8 @@ void CuckooTableBuilder::Add(const Slice& key, const Slice& value) {
       value_size_ = value.size();
     }
     if (value_size_ != value.size()) {
-      io_status_ =
-          IOStatus::NotSupported("all values have to be the same size");
+      status_ =
+          Status::NotSupported("all values have to be the same size");
       return;
     }
 
@@ -242,7 +242,16 @@ Status CuckooTableBuilder::MakeHashTable(std::vector<CuckooBucket>* buckets) {
   return Status::OK();
 }
 
-IOStatus CuckooTableBuilder::Finish() {
+Status CuckooTableBuilder::status() const {
+  if (!io_status_.ok()){
+    return io_status_;
+  }
+  return status_;
+}
+
+IOStatus CuckooTableBuilder::io_status() const { return io_status_; }
+
+Status CuckooTableBuilder::Finish() {
   assert(!closed_);
   closed_ = true;
   std::vector<CuckooBucket> buckets;
@@ -253,9 +262,9 @@ IOStatus CuckooTableBuilder::Finish() {
       hash_table_size_ =
         static_cast<uint64_t>(num_entries_ / max_hash_table_ratio_);
     }
-    io_status_ = status_to_io_status(MakeHashTable(&buckets));
-    if (!io_status_.ok()) {
-      return io_status_;
+    status_ = MakeHashTable(&buckets);
+    if (!status_.ok()) {
+      return status_;
     }
     // Determine unused_user_key to fill empty buckets.
     std::string unused_user_key = smallest_user_key_;
@@ -388,7 +397,7 @@ IOStatus CuckooTableBuilder::Finish() {
   std::string footer_encoding;
   footer.EncodeTo(&footer_encoding);
   io_status_ = file_->Append(footer_encoding);
-  return io_status_;
+  return status();
 }
 
 void CuckooTableBuilder::Abandon() {

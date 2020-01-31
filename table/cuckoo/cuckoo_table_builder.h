@@ -44,12 +44,15 @@ class CuckooTableBuilder: public TableBuilder {
   void Add(const Slice& key, const Slice& value) override;
 
   // Return non-ok iff some error has been detected.
-  Status status() const override { return io_status_; }
+  Status status() const override;
+
+  // Return the IO Status of table building
+  IOStatus io_status() const override;
 
   // Finish building the table.  Stops using the file passed to the
   // constructor after this function returns.
   // REQUIRES: Finish(), Abandon() have not been called
-  IOStatus Finish() override;
+  Status Finish() override;
 
   // Indicate that the contents of this builder should be abandoned.  Stops
   // using the file passed to the constructor after this function returns.
@@ -109,6 +112,7 @@ class CuckooTableBuilder: public TableBuilder {
   uint64_t num_entries_;
   // Number of keys that contain value (non-deletion op)
   uint64_t num_values_;
+  Status status_;
   IOStatus io_status_;
   TableProperties properties_;
   const Comparator* ucomp_;
