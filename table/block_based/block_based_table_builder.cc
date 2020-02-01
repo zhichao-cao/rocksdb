@@ -807,8 +807,8 @@ static void DeleteCachedBlockContents(const Slice& /*key*/, void* value) {
 // Make a copy of the block contents and insert into compressed block cache
 //
 Status BlockBasedTableBuilder::InsertBlockInCache(const Slice& block_contents,
-                                                    const CompressionType type,
-                                                    const BlockHandle* handle) {
+                                                  const CompressionType type,
+                                                  const BlockHandle* handle) {
   Rep* r = rep_;
   Cache* block_cache_compressed = r->table_options.block_cache_compressed.get();
 

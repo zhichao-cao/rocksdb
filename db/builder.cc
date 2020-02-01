@@ -81,11 +81,12 @@ Status BuildTable(
     SnapshotChecker* snapshot_checker, const CompressionType compression,
     uint64_t sample_for_compression, const CompressionOptions& compression_opts,
     bool paranoid_file_checks, InternalStats* internal_stats,
-    TableFileCreationReason reason, IOStatus* io_status, EventLogger* event_logger, int job_id,
-    const Env::IOPriority io_priority, TableProperties* table_properties,
-    int level, const uint64_t creation_time, const uint64_t oldest_key_time,
-    Env::WriteLifeTimeHint write_hint, const uint64_t file_creation_time) {
-  assert(io_status!=nullptr);
+    TableFileCreationReason reason, IOStatus* io_status,
+    EventLogger* event_logger, int job_id, const Env::IOPriority io_priority,
+    TableProperties* table_properties, int level, const uint64_t creation_time,
+    const uint64_t oldest_key_time, Env::WriteLifeTimeHint write_hint,
+    const uint64_t file_creation_time) {
+  assert(io_status != nullptr);
   assert((column_family_id ==
           TablePropertiesCollectorFactory::Context::kUnknownColumnFamily) ==
          column_family_name.empty());
@@ -213,7 +214,7 @@ Status BuildTable(
       *io_status = file_writer->Close();
     }
 
-    if (!io_status->ok()){
+    if (!io_status->ok()) {
       s = *io_status;
     }
     if (s.ok() && !empty) {
@@ -246,7 +247,7 @@ Status BuildTable(
     s = iter->status();
   }
 
-  //TODO store the IO status of table check to io_status
+  // TODO store the IO status of table check to io_status
 
   if (!s.ok() || meta->fd.GetFileSize() == 0) {
     fs->DeleteFile(fname, IOOptions(), nullptr);

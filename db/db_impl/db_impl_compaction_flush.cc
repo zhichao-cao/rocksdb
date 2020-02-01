@@ -13,6 +13,7 @@
 #include "db/builder.h"
 #include "db/error_handler.h"
 #include "db/event_helpers.h"
+#include "env/composite_env_wrapper.h"
 #include "file/sst_file_manager_impl.h"
 #include "monitoring/iostats_context_imp.h"
 #include "monitoring/perf_context_imp.h"
@@ -21,7 +22,6 @@
 #include "test_util/sync_point.h"
 #include "util/cast_util.h"
 #include "util/concurrent_task_limiter_impl.h"
-#include "env/composite_env_wrapper.h"
 
 namespace rocksdb {
 
@@ -195,9 +195,6 @@ Status DBImpl::FlushMemTableToOutputFile(
   }
 
   IOStatus io_s = flush_job.io_status();
-  if(!io_s.ok()){
-    error_handler_.SetBGError(io_s, BackgroundErrorReason::kFlush);
-  }
 
   if (s.ok()) {
     InstallSuperVersionAndScheduleWork(cfd, superversion_context,
@@ -211,9 +208,8 @@ Status DBImpl::FlushMemTableToOutputFile(
                      cfd->current()->storage_info()->LevelSummary(&tmp));
   }
 
-  if (!s.ok() && !s.IsShutdownInProgress() && !s.IsColumnFamilyDropped()) {
-    Status new_bg_error = s;
-    error_handler_.SetBGError(new_bg_error, BackgroundErrorReason::kFlush);
+  if (!io_s.ok() && !s.IsShutdownInProgress() && !s.IsColumnFamilyDropped()) {
+    error_handler_.SetBGError(io_s, BackgroundErrorReason::kFlush);
   }
   if (s.ok()) {
 #ifndef ROCKSDB_LITE
@@ -370,9 +366,13 @@ Status DBImpl::AtomicFlushMemTablesToOutputFiles(
   // exec_status stores the execution status of flush_jobs as
   // <bool /* executed */, Status /* status code */>
   autovector<std::pair<bool, Status>> exec_status;
+
+  // io_status stores the IO status of flush_jobs as
+  autovector<IOStatus> io_status;
   for (int i = 0; i != num_cfs; ++i) {
     // Initially all jobs are not executed, with status OK.
     exec_status.emplace_back(false, Status::OK());
+    io_status.emplace_back(IOStatus::OK());
   }
 
   if (s.ok()) {
@@ -381,6 +381,7 @@ Status DBImpl::AtomicFlushMemTablesToOutputFiles(
       exec_status[i].second =
           jobs[i]->Run(&logs_with_prep_tracker_, &file_meta[i]);
       exec_status[i].first = true;
+      io_status[i] = jobs[i]->io_status();
     }
     if (num_cfs > 1) {
       TEST_SYNC_POINT(
@@ -393,6 +394,7 @@ Status DBImpl::AtomicFlushMemTablesToOutputFiles(
     exec_status[0].second =
         jobs[0]->Run(&logs_with_prep_tracker_, &file_meta[0]);
     exec_status[0].first = true;
+    io_status[0] = jobs[0]->io_status();
 
     Status error_status;
     for (const auto& e : exec_status) {
@@ -409,6 +411,18 @@ Status DBImpl::AtomicFlushMemTablesToOutputFiles(
     }
 
     s = error_status.ok() ? s : error_status;
+
+    IOStatus io_error = IOStatus::OK();
+    for (int i = 0; i != num_cfs; i++) {
+      if (!io_status[i].ok() && !exec_status[i].second.IsShutdownInProgress() &&
+          !exec_status[i].second.IsColumnFamilyDropped()) {
+        io_error = io_status[i];
+        break;
+      }
+    }
+    if (!io_error.ok()) {
+      error_handler_.SetBGError(io_error, BackgroundErrorReason::kFlush);
+    }
   }
 
   if (s.IsColumnFamilyDropped()) {

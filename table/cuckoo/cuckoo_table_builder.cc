@@ -83,8 +83,7 @@ CuckooTableBuilder::CuckooTableBuilder(
 
 void CuckooTableBuilder::Add(const Slice& key, const Slice& value) {
   if (num_entries_ >= kMaxVectorIdx - 1) {
-    status_ =
-        Status::NotSupported("Number of keys in a file must be < 2^32-1");
+    status_ = Status::NotSupported("Number of keys in a file must be < 2^32-1");
     return;
   }
   ParsedInternalKey ikey;
@@ -120,8 +119,7 @@ void CuckooTableBuilder::Add(const Slice& key, const Slice& value) {
       value_size_ = value.size();
     }
     if (value_size_ != value.size()) {
-      status_ =
-          Status::NotSupported("all values have to be the same size");
+      status_ = Status::NotSupported("all values have to be the same size");
       return;
     }
 
@@ -243,7 +241,7 @@ Status CuckooTableBuilder::MakeHashTable(std::vector<CuckooBucket>* buckets) {
 }
 
 Status CuckooTableBuilder::status() const {
-  if (!io_status_.ok()){
+  if (!io_status_.ok()) {
     return io_status_;
   }
   return status_;

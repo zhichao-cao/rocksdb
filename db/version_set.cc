@@ -3850,13 +3850,21 @@ Status VersionSet::ProcessManifestWrites(
         }
         ++idx;
 #endif /* !NDEBUG */
-        s = descriptor_log_->AddRecord(record);
-        if (!s.ok()) {
+        IOStatus io_s;
+        io_s = descriptor_log_->AddRecord(record);
+        if (!io_s.ok()) {
+          io_status_ = io_s;
           break;
         }
+        s = io_s;
       }
       if (s.ok()) {
-        s = SyncManifest(env_, db_options_, descriptor_log_->file());
+        IOStatus io_s;
+        io_s = SyncManifest(env_, db_options_, descriptor_log_->file());
+        if (!io_s.ok()) {
+          io_status_ = io_s;
+          s = io_s;
+        }
       }
       if (!s.ok()) {
         ROCKS_LOG_ERROR(db_options_->info_log, "MANIFEST write %s\n",
@@ -4952,9 +4960,10 @@ Status VersionSet::WriteCurrentStateToManifest(
       return Status::Corruption("Unable to Encode VersionEdit:" +
                                 edit_for_db_id.DebugString(true));
     }
-    Status add_record = log->AddRecord(db_id_record);
-    if (!add_record.ok()) {
-      return add_record;
+    IOStatus io_s = log->AddRecord(db_id_record);
+    if (!io_s.ok()) {
+      io_status_ = io_s;
+      return io_s;
     }
   }
 
@@ -4979,9 +4988,10 @@ Status VersionSet::WriteCurrentStateToManifest(
         return Status::Corruption(
             "Unable to Encode VersionEdit:" + edit.DebugString(true));
       }
-      Status s = log->AddRecord(record);
-      if (!s.ok()) {
-        return s;
+      IOStatus io_s = log->AddRecord(record);
+      if (!io_s.ok()) {
+        io_status_ = io_s;
+        return io_s;
       }
     }
 
@@ -5009,9 +5019,10 @@ Status VersionSet::WriteCurrentStateToManifest(
         return Status::Corruption(
             "Unable to Encode VersionEdit:" + edit.DebugString(true));
       }
-      Status s = log->AddRecord(record);
-      if (!s.ok()) {
-        return s;
+      IOStatus io_s = log->AddRecord(record);
+      if (!io_s.ok()) {
+        io_status_ = io_s;
+        return io_s;
       }
     }
   }

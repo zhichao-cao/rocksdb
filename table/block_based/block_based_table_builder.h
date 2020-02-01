@@ -114,8 +114,8 @@ class BlockBasedTableBuilder : public TableBuilder {
   void WriteRawBlock(const Slice& data, CompressionType, BlockHandle* handle,
                      bool is_data_block = false);
   Status InsertBlockInCache(const Slice& block_contents,
-                              const CompressionType type,
-                              const BlockHandle* handle);
+                            const CompressionType type,
+                            const BlockHandle* handle);
 
   void WriteFilterBlock(MetaIndexBuilder* meta_index_builder);
   void WriteIndexBlock(MetaIndexBuilder* meta_index_builder,

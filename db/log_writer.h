@@ -13,9 +13,9 @@
 #include <memory>
 
 #include "db/log_format.h"
+#include "rocksdb/io_status.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
-#include "rocksdb/io_status.h"
 
 namespace rocksdb {
 
