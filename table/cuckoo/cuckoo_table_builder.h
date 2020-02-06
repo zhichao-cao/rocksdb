@@ -49,6 +49,9 @@ class CuckooTableBuilder: public TableBuilder {
   // Return the IO Status of table building
   IOStatus io_status() const override;
 
+  // Return non-ok iff some error happens during IO.
+  IOStatus io_status() const override { return io_status_; }
+
   // Finish building the table.  Stops using the file passed to the
   // constructor after this function returns.
   // REQUIRES: Finish(), Abandon() have not been called

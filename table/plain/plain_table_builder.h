@@ -61,8 +61,8 @@ class PlainTableBuilder: public TableBuilder {
   // Return non-ok iff some error has been detected.
   Status status() const override;
 
-  // Return IO Status IO during table building
-  IOStatus io_status() const override;
+  // Return non-ok iff some error happens during IO.
+  IOStatus io_status() const override { return io_status_; }
 
   // Finish building the table.  Stops using the file passed to the
   // constructor after this function returns.

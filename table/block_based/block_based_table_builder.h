@@ -68,7 +68,7 @@ class BlockBasedTableBuilder : public TableBuilder {
   // Return non-ok iff some error has been detected.
   Status status() const override;
 
-  // Return IO Status
+  // Return non-ok iff some error happens during IO.
   IOStatus io_status() const override;
 
   // Finish building the table.  Stops using the file passed to the

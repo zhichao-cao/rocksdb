@@ -798,6 +798,8 @@ Status BlockBasedTableBuilder::status() const {
 
 IOStatus BlockBasedTableBuilder::io_status() const { return rep_->io_status; }
 
+IOStatus BlockBasedTableBuilder::io_status() const { return rep_->io_status; }
+
 static void DeleteCachedBlockContents(const Slice& /*key*/, void* value) {
   BlockContents* bc = reinterpret_cast<BlockContents*>(value);
   delete bc;
