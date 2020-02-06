@@ -239,6 +239,33 @@ Status ErrorHandler::SetBGError(const Status& bg_err, BackgroundErrorReason reas
   return bg_error_;
 }
 
+Status ErrorHandler::SetBGError(const IOStatus& bg_io_err,
+                                BackgroundErrorReason reason) {
+  db_mutex_->AssertHeld();
+  if (bg_io_err.ok()) {
+    return Status::OK();
+  }
+  if (recovery_in_prog_ && recovery_error_.ok()) {
+    recovery_error_ = bg_io_err;
+  }
+  Status new_bg_err = bg_io_err;
+
+  if (bg_io_err.GetRetryable()) {
+    bool auto_recovery = auto_recovery_;
+    Status bg_err(new_bg_err, Status::Severity::kHardError);
+    bg_error_ = bg_err;
+    EventHelpers::NotifyOnBackgroundError(db_options_.listeners, reason,
+                                          &bg_err, db_mutex_, &auto_recovery);
+    if (auto_recovery) {
+      recovery_in_prog_ = true;
+      return RecoverFromBGError();
+    }
+  } else {
+    return SetBGError(new_bg_err, reason);
+  }
+  return bg_error_;
+}
+
 Status ErrorHandler::OverrideNoSpaceError(Status bg_error,
                                           bool* auto_recovery) {
 #ifndef ROCKSDB_LITE
