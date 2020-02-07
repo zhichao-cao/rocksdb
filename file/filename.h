@@ -17,10 +17,10 @@
 
 #include "options/db_options.h"
 #include "port/port.h"
+#include "rocksdb/io_status.h"
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/status.h"
-#include "rocksdb/io_status.h"
 #include "rocksdb/transaction_log.h"
 
 namespace rocksdb {
@@ -164,8 +164,8 @@ extern bool ParseFileName(const std::string& filename, uint64_t* number,
 // Make the CURRENT file point to the descriptor file with the
 // specified number.
 extern IOStatus SetCurrentFile(FileSystem* fs, const std::string& dbname,
-                             uint64_t descriptor_number,
-                             Directory* directory_to_fsync);
+                               uint64_t descriptor_number,
+                               Directory* directory_to_fsync);
 
 // Make the IDENTITY file for the db
 extern Status SetIdentityFile(Env* env, const std::string& dbname,
@@ -173,7 +173,7 @@ extern Status SetIdentityFile(Env* env, const std::string& dbname,
 
 // Sync manifest file `file`.
 extern IOStatus SyncManifest(Env* env, const ImmutableDBOptions* db_options,
-                           WritableFileWriter* file);
+                             WritableFileWriter* file);
 
 // Return list of file names of info logs in `file_names`.
 // The list only contains file name. The parent directory name is stored

@@ -369,8 +369,8 @@ bool ParseFileName(const std::string& fname, uint64_t* number,
 }
 
 IOStatus SetCurrentFile(FileSystem* fs, const std::string& dbname,
-                      uint64_t descriptor_number,
-                      Directory* directory_to_fsync) {
+                        uint64_t descriptor_number,
+                        Directory* directory_to_fsync) {
   // Remove leading "dbname/" and add newline to manifest file name
   std::string manifest = DescriptorFileName(dbname, descriptor_number);
   Slice contents = manifest;
@@ -415,7 +415,7 @@ Status SetIdentityFile(Env* env, const std::string& dbname,
 }
 
 IOStatus SyncManifest(Env* env, const ImmutableDBOptions* db_options,
-                    WritableFileWriter* file) {
+                      WritableFileWriter* file) {
   TEST_KILL_RANDOM("SyncManifest:0", rocksdb_kill_odds * REDUCE_ODDS2);
   StopWatch sw(env, db_options->statistics.get(), MANIFEST_FILE_SYNC_MICROS);
   return file->Sync(db_options->use_fsync);
