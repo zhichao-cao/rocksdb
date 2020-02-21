@@ -726,7 +726,12 @@ void BlockBasedTableBuilder::WriteRawBlock(const Slice& block_contents,
   handle->set_size(block_contents.size());
   assert(r->status.ok());
   assert(r->io_status.ok());
+  fprintf(stdout,"before append block content\n");
   r->io_status = r->file->Append(block_contents);
+  fprintf(stdout,"after append block content %s\n", r->io_status.ToString().c_str());
+  if (!r->io_status.ok()) {
+    fprintf(stdout,"file append not ok\n");
+  }
   if (r->io_status.ok()) {
     char trailer[kBlockTrailerSize];
     trailer[0] = type;
@@ -770,7 +775,9 @@ void BlockBasedTableBuilder::WriteRawBlock(const Slice& block_contents,
     TEST_SYNC_POINT_CALLBACK(
         "BlockBasedTableBuilder::WriteRawBlock:TamperWithChecksum",
         static_cast<char*>(trailer));
+    fprintf(stdout,"before append traller\n");
     r->io_status = r->file->Append(Slice(trailer, kBlockTrailerSize));
+    fprintf(stdout,"after append trailer %s\n", r->io_status.ToString().c_str());
     if (r->io_status.ok()) {
       r->status = InsertBlockInCache(block_contents, type, handle);
     }
@@ -1038,6 +1045,7 @@ void BlockBasedTableBuilder::WriteRangeDelBlock(
 
 void BlockBasedTableBuilder::WriteFooter(BlockHandle& metaindex_block_handle,
                                          BlockHandle& index_block_handle) {
+  fprintf(stdout,"write footer\n");
   Rep* r = rep_;
   // No need to write out new footer if we're using default checksum.
   // We're writing legacy magic number because we want old versions of RocksDB

@@ -238,8 +238,9 @@ Status ErrorHandler::SetBGError(const Status& bg_err, BackgroundErrorReason reas
   return bg_error_;
 }
 
-Status ErrorHandler::SetBGError(const IOStatus& bg_io_err,
+Status ErrorHandler::SetBGError(IOStatus bg_io_err,
                                 BackgroundErrorReason reason) {
+  fprintf(stdout, "Set IOStatus BGError\n");
   db_mutex_->AssertHeld();
   if (bg_io_err.ok()) {
     return Status::OK();
@@ -251,10 +252,15 @@ Status ErrorHandler::SetBGError(const IOStatus& bg_io_err,
   Status s;
   // First, check if the error is a retryable IO error or not.
   if (bg_io_err.GetRetryable()) {
+    fprintf(stdout, "io error %s\n", bg_io_err.ToString().c_str());
     // In current stage, treat retryable error as HardError.
     Status bg_err(new_bg_io_err, Status::Severity::kHardError);
-    s = SetBGError(bg_err, reason);
+    bg_error_ = bg_err;
+    fprintf(stdout, "retryable to hard error\n");
+    return bg_error_;
+    //s = SetBGError(bg_err, reason);
   } else {
+    fprintf(stdout, "no retryable flag\n");
     s = SetBGError(new_bg_io_err, reason);
   }
   return s;

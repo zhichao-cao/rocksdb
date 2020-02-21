@@ -35,7 +35,7 @@ class ErrorHandler {
 
    Status SetBGError(const Status& bg_err, BackgroundErrorReason reason);
 
-   Status SetBGError(const IOStatus& bg_io_err, BackgroundErrorReason reason);
+   Status SetBGError(IOStatus bg_io_err, BackgroundErrorReason reason);
 
    Status GetBGError() { return bg_error_; }
 

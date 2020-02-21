@@ -390,6 +390,9 @@ Status FlushJob::WriteLevel0Table() {
           job_context_->job_id, Env::IO_HIGH, &table_properties_, 0 /* level */,
           meta_.oldest_ancester_time, oldest_key_time, write_hint,
           current_time);
+      if (io_s.GetRetryable()) {
+            fprintf(stdout,"Real retry 5\n");
+      }
       if (!io_s.ok()) {
         io_status_ = io_s;
       }

@@ -174,6 +174,9 @@ IOStatus WritableFileWriter::Flush() {
 #endif  // !ROCKSDB_LITE
     } else {
       s = WriteBuffered(buf_.BufferStart(), buf_.CurrentSize());
+      if (s.GetRetryable()) {
+            fprintf(stdout,"Real retry 2\n");
+      }
     }
     if (!s.ok()) {
       return s;
@@ -307,7 +310,12 @@ IOStatus WritableFileWriter::WriteBuffered(const char* data, size_t size) {
       {
         auto prev_perf_level = GetPerfLevel();
         IOSTATS_CPU_TIMER_GUARD(cpu_write_nanos, env_);
+        fprintf(stdout, "in writebuffered before append\n");
         s = writable_file_->Append(Slice(src, allowed), IOOptions(), nullptr);
+        fprintf(stdout, "in writebuffered after append: %p, %s\n", writable_file_.get(), s.ToString().c_str());
+        if (s.GetRetryable()) {
+              fprintf(stdout,"Real retry 1.5\n");
+        }
         SetPerfLevel(prev_perf_level);
       }
 #ifndef ROCKSDB_LITE

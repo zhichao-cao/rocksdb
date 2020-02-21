@@ -164,15 +164,30 @@ TEST_F(DBErrorHandlingFSTest, FLushWriteError) {
   DestroyAndReopen(options);
 
   Put(Key(0), "val");
-  SyncPoint::GetInstance()->SetCallBack("FlushJob::Start", [&](void*) {
-    fault_fs->SetFilesystemActive(false, IOStatus::NoSpace("Out of space"));
+  IOStatus error_msg = IOStatus::IOError("Retryable IO Error");
+  error_msg.SetRetryable(true);
+  IOStatus e2;
+  e2 = error_msg;
+  if (error_msg.GetRetryable()) {
+              fprintf(stdout,"Real retry -1 %s\n", e2.ToString().c_str());
+  }
+  if (e2.GetRetryable()) {
+                fprintf(stdout,"Real retry copied -1 %s\n", e2.ToString().c_str());
+  }
+  if (error_msg.GetRetryable()) {
+      fprintf(stdout, "pass in seted\n");
+  }
+  SyncPoint::GetInstance()->SetCallBack("BuildTable:BeforeFinishBuildTable", [&](void*) {
+    fault_fs->SetFilesystemActive(false, error_msg);
   });
   SyncPoint::GetInstance()->EnableProcessing();
   s = Flush();
   ASSERT_EQ(s.severity(), rocksdb::Status::Severity::kHardError);
   SyncPoint::GetInstance()->DisableProcessing();
   fault_fs->SetFilesystemActive(true);
+  fprintf(stdout, "before resume\n");
   s = dbfull()->Resume();
+  fprintf(stdout, "After resume\n");
   ASSERT_EQ(s, Status::OK());
 
   Reopen(options);

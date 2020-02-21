@@ -24,7 +24,7 @@ namespace rocksdb {
 class Status {
  public:
   // Create a success status.
-  Status() : code_(kOk), subcode_(kNone), sev_(kNoError), state_(nullptr) {}
+  Status() : retryable_(false), code_(kOk), subcode_(kNone), sev_(kNoError), state_(nullptr) {}
   ~Status() { delete[] state_; }
 
   // Copy the specified status.
@@ -306,19 +306,23 @@ class Status {
   // Returns the string "OK" for success.
   std::string ToString() const;
 
+  void setRetryable(bool retry) {retryable_ = retry;}
+  bool getRetryable() const {return retryable_;}
+
  protected:
   // A nullptr state_ (which is always the case for OK) means the message
   // is empty.
   // of the following form:
   //    state_[0..3] == length of message
   //    state_[4..]  == message
+  bool retryable_;
   Code code_;
   SubCode subcode_;
   Severity sev_;
   const char* state_;
 
   explicit Status(Code _code, SubCode _subcode = kNone)
-      : code_(_code), subcode_(_subcode), sev_(kNoError), state_(nullptr) {}
+      : retryable_(false), code_(_code), subcode_(_subcode), sev_(kNoError), state_(nullptr) {}
 
   Status(Code _code, SubCode _subcode, const Slice& msg, const Slice& msg2);
   Status(Code _code, const Slice& msg, const Slice& msg2)
@@ -328,11 +332,11 @@ class Status {
 };
 
 inline Status::Status(const Status& s)
-    : code_(s.code_), subcode_(s.subcode_), sev_(s.sev_) {
+    : retryable_(s.retryable_), code_(s.code_), subcode_(s.subcode_), sev_(s.sev_) {
   state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
 }
 inline Status::Status(const Status& s, Severity sev)
-    : code_(s.code_), subcode_(s.subcode_), sev_(sev) {
+    : retryable_(s.retryable_),code_(s.code_), subcode_(s.subcode_), sev_(sev) {
   state_ = (s.state_ == nullptr) ? nullptr : CopyState(s.state_);
 }
 inline Status& Status::operator=(const Status& s) {
@@ -340,6 +344,7 @@ inline Status& Status::operator=(const Status& s) {
   // and the common case where both s and *this are ok.
   if (this != &s) {
     code_ = s.code_;
+    retryable_ = s.retryable_;
     subcode_ = s.subcode_;
     sev_ = s.sev_;
     delete[] state_;
@@ -362,6 +367,7 @@ inline Status& Status::operator=(Status&& s)
 #endif
 {
   if (this != &s) {
+    retryable_ = s.retryable_;
     code_ = std::move(s.code_);
     s.code_ = kOk;
     subcode_ = std::move(s.subcode_);

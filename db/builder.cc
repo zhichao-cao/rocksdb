@@ -157,6 +157,7 @@ Status BuildTable(
         ShouldReportDetailedTime(env, ioptions.statistics),
         true /* internal key corruption is not ok */, range_del_agg.get());
     c_iter.SeekToFirst();
+    TEST_SYNC_POINT("BuildTable:BeforeFinishBuildTable");
     for (; c_iter.Valid(); c_iter.Next()) {
       const Slice& key = c_iter.key();
       const Slice& value = c_iter.value();
@@ -211,12 +212,18 @@ Status BuildTable(
     // Finish and check for file errors
     if (s.ok() && !empty) {
       StopWatch sw(env, ioptions.statistics, TABLE_SYNC_MICROS);
+      fprintf(stdout,"before sync\n");
       *io_status = file_writer->Sync(ioptions.use_fsync);
+      if (io_status->GetRetryable()) {
+            fprintf(stdout,"Real retry 2\n");
+      }
     }
-    if (io_status->ok() && !empty) {
+    if (s.ok() && io_status->ok() && !empty) {
       *io_status = file_writer->Close();
+      fprintf(stdout,"IO status 2:: %s\n", io_status->ToString().c_str());
     }
     if (!io_status->ok()) {
+      fprintf(stdout,"IO status 3:: %s\n", io_status->ToString().c_str());
       s = *io_status;
     }
 
@@ -246,7 +253,7 @@ Status BuildTable(
       }
     }
   }
-
+  fprintf(stdout,"IO status 4:: %s\n", io_status->ToString().c_str());
   // Check for input iterator errors
   if (!iter->status().ok()) {
     s = iter->status();

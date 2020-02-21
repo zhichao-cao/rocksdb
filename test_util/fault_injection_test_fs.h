@@ -218,11 +218,17 @@ class FaultInjectionTestFS : public FileSystemWrapper {
     filesystem_active_ = active;
     if (!active) {
       error_ = error;
+      if (error_.GetRetryable()) {
+                fprintf(stdout,"Real retry 0.5\n");
+      }
     }
   }
   void SetFilesystemActive(
       bool active, IOStatus error = IOStatus::Corruption("Not active")) {
     MutexLock l(&mutex_);
+    if (error.GetRetryable()) {
+              fprintf(stdout,"Real retry 0\n");
+    }
     SetFilesystemActiveNoLock(active, error);
   }
   void AssertNoOpenFile() { assert(open_files_.empty()); }

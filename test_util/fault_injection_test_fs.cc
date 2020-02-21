@@ -14,6 +14,7 @@
 #include "test_util/fault_injection_test_fs.h"
 #include <functional>
 #include <utility>
+#include <iostream>
 
 namespace rocksdb {
 
@@ -134,6 +135,10 @@ TestFSWritableFile::~TestFSWritableFile() {
 IOStatus TestFSWritableFile::Append(const Slice& data, const IOOptions& options,
                                     IODebugContext* dbg) {
   if (!fs_->IsFilesystemActive()) {
+    fprintf(stdout,"file append fail\n");
+    if (fs_->GetError().GetRetryable()) {
+        fprintf(stdout,"Real retry 1 %p\n", this);
+    }
     return fs_->GetError();
   }
   IOStatus io_s = target_->Append(data, options, dbg);
@@ -159,6 +164,10 @@ IOStatus TestFSWritableFile::Close(const IOOptions& options,
 
 IOStatus TestFSWritableFile::Flush(const IOOptions&, IODebugContext*) {
   if (!fs_->IsFilesystemActive()) {
+    fprintf(stdout,"file flush\n");
+    if (fs_->GetError().GetRetryable()) {
+      fprintf(stdout,"Real retry\n");
+    }
     return fs_->GetError();
   }
   IOStatus io_s;
@@ -171,6 +180,7 @@ IOStatus TestFSWritableFile::Flush(const IOOptions&, IODebugContext*) {
 IOStatus TestFSWritableFile::Sync(const IOOptions& options,
                                   IODebugContext* dbg) {
   if (!fs_->IsFilesystemActive()) {
+    fprintf(stdout,"sync error\n");
     return fs_->GetError();
   }
   target_->Sync(options, dbg);
@@ -333,6 +343,7 @@ IOStatus FaultInjectionTestFS::DeleteFile(const std::string& f,
                                           const IOOptions& options,
                                           IODebugContext* dbg) {
   if (!IsFilesystemActive()) {
+    std::cout<<f<<"\n";
     return GetError();
   }
   IOStatus io_s = FileSystemWrapper::DeleteFile(f, options, dbg);
@@ -364,10 +375,14 @@ IOStatus FaultInjectionTestFS::RenameFile(const std::string& s,
 
     auto sdn = TestFSGetDirAndName(s);
     auto tdn = TestFSGetDirAndName(t);
+    std::cout<<sdn.first<<" "<<sdn.second<<"\n";
+    std::cout<<tdn.first<<" "<<tdn.second<<"\n";
     if (dir_to_new_files_since_last_sync_[sdn.first].erase(sdn.second) != 0) {
       auto& tlist = dir_to_new_files_since_last_sync_[tdn.first];
-      assert(tlist.find(tdn.second) == tlist.end());
-      tlist.insert(tdn.second);
+      //assert(tlist.find(tdn.second) == tlist.end());
+      if (tlist.find(tdn.second) == tlist.end()) {
+        tlist.insert(tdn.second);
+      }
     }
   }
 
