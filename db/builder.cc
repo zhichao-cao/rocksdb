@@ -193,7 +193,7 @@ Status BuildTable(
     }
     *io_status = builder->io_status();
 
-    if (s.ok() && !empty) {
+    if (s.ok() && io_status->ok() && !empty) {
       uint64_t file_size = builder->FileSize();
       meta->fd.file_size = file_size;
       meta->marked_for_compaction = builder->NeedCompact();

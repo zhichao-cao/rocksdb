@@ -79,7 +79,7 @@ bool DBImpl::RequestCompactionToken(ColumnFamilyData* cfd, bool force,
   return false;
 }
 
-Status DBImpl::SyncClosedLogs(JobContext* job_context) {
+IOStatus DBImpl::SyncClosedLogs(JobContext* job_context) {
   TEST_SYNC_POINT("DBImpl::SyncClosedLogs:Start");
   mutex_.AssertHeld();
   autovector<log::Writer*, 1> logs_to_sync;
@@ -168,6 +168,7 @@ Status DBImpl::FlushMemTableToOutputFile(
 #endif  // ROCKSDB_LITE
 
   Status s;
+  IOStatus io_s;
   if (logfile_number_ > 0 &&
       versions_->GetColumnFamilySet()->NumberOfColumnFamilies() > 1) {
     // If there are more than one column families, we need to make sure that
@@ -176,7 +177,7 @@ Status DBImpl::FlushMemTableToOutputFile(
     // flushed SST may contain data from write batches whose updates to
     // other column families are missing.
     // SyncClosedLogs() may unlock and re-lock the db_mutex.
-    s = SyncClosedLogs(job_context);
+    io_s = SyncClosedLogs(job_context);
   } else {
     TEST_SYNC_POINT("DBImpl::SyncClosedLogs:Skip");
   }
@@ -187,12 +188,13 @@ Status DBImpl::FlushMemTableToOutputFile(
   // Note that flush_job.Run will unlock and lock the db_mutex,
   // and EventListener callback will be called when the db_mutex
   // is unlocked by the current thread.
-  if (s.ok()) {
+  if (io_s.ok()) {
     s = flush_job.Run(&logs_with_prep_tracker_, &file_meta);
+    io_s = flush_job.io_status();
   } else {
+    s = io_s;
     flush_job.Cancel();
   }
-  IOStatus io_s = flush_job.io_status();
 
   if (s.ok()) {
     InstallSuperVersionAndScheduleWork(cfd, superversion_context,

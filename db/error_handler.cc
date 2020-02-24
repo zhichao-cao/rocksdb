@@ -253,7 +253,8 @@ Status ErrorHandler::SetBGError(const IOStatus& bg_io_err,
   if (bg_io_err.GetRetryable()) {
     // In current stage, treat retryable error as HardError.
     Status bg_err(new_bg_io_err, Status::Severity::kHardError);
-    s = SetBGError(bg_err, reason);
+    bg_error_ = bg_err;
+    return bg_error_;
   } else {
     s = SetBGError(new_bg_io_err, reason);
   }
