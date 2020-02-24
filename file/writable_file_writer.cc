@@ -21,7 +21,7 @@
 #include "util/rate_limiter.h"
 
 namespace ROCKSDB_NAMESPACE {
-Status WritableFileWriter::Append(const Slice& data) {
+IOStatus WritableFileWriter::Append(const Slice& data) {
   const char* src = data.data();
   size_t left = data.size();
   IOStatus s;
