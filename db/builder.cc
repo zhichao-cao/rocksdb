@@ -186,6 +186,7 @@ Status BuildTable(
     tp = builder->GetTableProperties();
     bool empty = builder->NumEntries() == 0 && tp.num_range_deletions == 0;
     s = c_iter.status();
+    TEST_SYNC_POINT("BuildTable:BeforeFinishBuildTable");
     if (!s.ok() || empty) {
       builder->Abandon();
     } else {
@@ -209,10 +210,12 @@ Status BuildTable(
     delete builder;
 
     // Finish and check for file errors
+    TEST_SYNC_POINT("BuildTable:BeforeSyncTable");
     if (s.ok() && !empty) {
       StopWatch sw(env, ioptions.statistics, TABLE_SYNC_MICROS);
       *io_status = file_writer->Sync(ioptions.use_fsync);
     }
+    TEST_SYNC_POINT("BuildTable:BeforeCloseTableFile");
     if (io_status->ok() && !empty) {
       *io_status = file_writer->Close();
     }

@@ -180,6 +180,69 @@ TEST_F(DBErrorHandlingFSTest, FLushWriteError) {
   Destroy(options);
 }
 
+TEST_F(DBErrorHandlingFSTest, FLushWritRetryableeError) {
+  FaultInjectionTestFS* fault_fs =
+      new FaultInjectionTestFS(FileSystem::Default().get());
+  std::shared_ptr<ErrorHandlerFSListener> listener(
+      new ErrorHandlerFSListener());
+  Options options = GetDefaultOptions();
+  options.file_system.reset(fault_fs);
+  options.create_if_missing = true;
+  options.listeners.emplace_back(listener);
+  Status s;
+
+  listener->EnableAutoRecovery(false);
+  DestroyAndReopen(options);
+
+  IOStatus error_msg = IOStatus::IOError("Retryable IO Error");
+  error_msg.SetRetryable(true);
+
+  Put(Key(1), "val1");
+  SyncPoint::GetInstance()->SetCallBack("BuildTable:BeforeFinishBuildTable", [&](void*) {
+    fault_fs->SetFilesystemActive(false, error_msg);
+  });
+  SyncPoint::GetInstance()->EnableProcessing();
+  s = Flush();
+  ASSERT_EQ(s.severity(), rocksdb::Status::Severity::kHardError);
+  SyncPoint::GetInstance()->DisableProcessing();
+  fault_fs->SetFilesystemActive(true);
+  s = dbfull()->Resume();
+  ASSERT_EQ(s, Status::OK());
+  Reopen(options);
+  ASSERT_EQ("val1", Get(Key(1)));
+
+  Put(Key(2), "val2");
+  SyncPoint::GetInstance()->SetCallBack("BuildTable:BeforeSyncTable", [&](void*) {
+    fault_fs->SetFilesystemActive(false, error_msg);
+  });
+  SyncPoint::GetInstance()->EnableProcessing();
+  s = Flush();
+  ASSERT_EQ(s.severity(), rocksdb::Status::Severity::kHardError);
+  SyncPoint::GetInstance()->DisableProcessing();
+  fault_fs->SetFilesystemActive(true);
+  s = dbfull()->Resume();
+  ASSERT_EQ(s, Status::OK());
+  Reopen(options);
+  ASSERT_EQ("val2", Get(Key(2)));
+
+  Put(Key(3), "val3");
+  SyncPoint::GetInstance()->SetCallBack("BuildTable:BeforeCloseTableFile", [&](void*) {
+    fault_fs->SetFilesystemActive(false, error_msg);
+  });
+  SyncPoint::GetInstance()->EnableProcessing();
+  s = Flush();
+  ASSERT_EQ(s.severity(), rocksdb::Status::Severity::kHardError);
+  SyncPoint::GetInstance()->DisableProcessing();
+  fault_fs->SetFilesystemActive(true);
+  s = dbfull()->Resume();
+  ASSERT_EQ(s, Status::OK());
+  Reopen(options);
+  ASSERT_EQ("val3", Get(Key(3)));
+
+  Destroy(options);
+}
+
+
 TEST_F(DBErrorHandlingFSTest, ManifestWriteError) {
   FaultInjectionTestFS* fault_fs =
       new FaultInjectionTestFS(FileSystem::Default().get());
@@ -203,6 +266,51 @@ TEST_F(DBErrorHandlingFSTest, ManifestWriteError) {
   SyncPoint::GetInstance()->SetCallBack(
       "VersionSet::LogAndApply:WriteManifest", [&](void*) {
         fault_fs->SetFilesystemActive(false, IOStatus::NoSpace("Out of space"));
+      });
+  SyncPoint::GetInstance()->EnableProcessing();
+  s = Flush();
+  ASSERT_EQ(s.severity(), rocksdb::Status::Severity::kHardError);
+  SyncPoint::GetInstance()->ClearAllCallBacks();
+  SyncPoint::GetInstance()->DisableProcessing();
+  fault_fs->SetFilesystemActive(true);
+  s = dbfull()->Resume();
+  ASSERT_EQ(s, Status::OK());
+
+  new_manifest = GetManifestNameFromLiveFiles();
+  ASSERT_NE(new_manifest, old_manifest);
+
+  Reopen(options);
+  ASSERT_EQ("val", Get(Key(0)));
+  ASSERT_EQ("val", Get(Key(1)));
+  Close();
+}
+
+TEST_F(DBErrorHandlingFSTest, ManifestWriteRetryableError) {
+  FaultInjectionTestFS* fault_fs =
+      new FaultInjectionTestFS(FileSystem::Default().get());
+  std::shared_ptr<ErrorHandlerFSListener> listener(
+      new ErrorHandlerFSListener());
+  Options options = GetDefaultOptions();
+  options.file_system.reset(fault_fs);
+  options.create_if_missing = true;
+  options.listeners.emplace_back(listener);
+  Status s;
+  std::string old_manifest;
+  std::string new_manifest;
+
+  listener->EnableAutoRecovery(false);
+  DestroyAndReopen(options);
+  old_manifest = GetManifestNameFromLiveFiles();
+
+  IOStatus error_msg = IOStatus::IOError("Retryable IO Error");
+  error_msg.SetRetryable(true);
+
+  Put(Key(0), "val");
+  Flush();
+  Put(Key(1), "val");
+  SyncPoint::GetInstance()->SetCallBack(
+      "VersionSet::LogAndApply:WriteManifest", [&](void*) {
+        fault_fs->SetFilesystemActive(false, error_msg);
       });
   SyncPoint::GetInstance()->EnableProcessing();
   s = Flush();
@@ -342,6 +450,133 @@ TEST_F(DBErrorHandlingFSTest, CompactionManifestWriteError) {
   ASSERT_EQ("val", Get(Key(2)));
   Close();
 }
+/*
+TEST_F(DBErrorHandlingFSTest, CompactionManifestWriteRetryableError) {
+  FaultInjectionTestFS* fault_fs =
+      new FaultInjectionTestFS(FileSystem::Default().get());
+  std::shared_ptr<ErrorHandlerFSListener> listener(
+      new ErrorHandlerFSListener());
+  Options options = GetDefaultOptions();
+  options.file_system.reset(fault_fs);
+  options.create_if_missing = true;
+  options.level0_file_num_compaction_trigger = 2;
+  options.listeners.emplace_back(listener);
+  Status s;
+  std::string old_manifest;
+  std::string new_manifest;
+  std::atomic<bool> fail_manifest(false);
+  DestroyAndReopen(options);
+  old_manifest = GetManifestNameFromLiveFiles();
+
+  IOStatus error_msg = IOStatus::IOError("Retryable IO Error");
+  error_msg.SetRetryable(true);
+
+  Put(Key(0), "val");
+  Put(Key(2), "val");
+  s = Flush();
+  ASSERT_EQ(s, Status::OK());
+
+  rocksdb::SyncPoint::GetInstance()->LoadDependency(
+      // Wait for flush of 2nd L0 file before starting compaction
+      {{"DBImpl::FlushMemTable:FlushMemTableFinished",
+        "BackgroundCallCompaction:0"},
+       // Wait for compaction to detect manifest write error
+       {"BackgroundCallCompaction:1", "CompactionManifestWriteError:0"},
+       // Make compaction thread wait for error to be cleared
+       {"CompactionManifestWriteError:1",
+        "DBImpl::BackgroundCallCompaction:FoundObsoleteFiles"});
+  // trigger manifest write failure in compaction thread
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+      "BackgroundCallCompaction:0", [&](void*) { fail_manifest.store(true); });
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+      "VersionSet::LogAndApply:WriteManifest", [&](void*) {
+        if (fail_manifest.load()) {
+          fault_fs->SetFilesystemActive(false, error_msg);
+        }
+      });
+  rocksdb::SyncPoint::GetInstance()->EnableProcessing();
+
+  Put(Key(1), "val");
+  // This Flush will trigger a compaction, which will fail when appending to
+  // the manifest
+  s = Flush();
+  ASSERT_EQ(s, Status::OK());
+
+  TEST_SYNC_POINT("CompactionManifestWriteError:0");
+  rocksdb::SyncPoint::GetInstance()->ClearAllCallBacks();
+  TEST_SYNC_POINT("CompactionManifestWriteError:1");
+
+  s = dbfull()->TEST_WaitForCompact();
+  ASSERT_EQ(s.severity(), rocksdb::Status::Severity::kHardError);
+
+  fault_fs->SetFilesystemActive(true);
+  s = dbfull()->Resume();
+  ASSERT_EQ(s, Status::OK());
+
+  new_manifest = GetManifestNameFromLiveFiles();
+  ASSERT_NE(new_manifest, old_manifest);
+  Reopen(options);
+  ASSERT_EQ("val", Get(Key(0)));
+  ASSERT_EQ("val", Get(Key(1)));
+  ASSERT_EQ("val", Get(Key(2)));
+  Close();
+}
+*/
+
+TEST_F(DBErrorHandlingFSTest, CompactionWriteManifestRetryableError) {
+  FaultInjectionTestFS* fault_fs =
+      new FaultInjectionTestFS(FileSystem::Default().get());
+  std::shared_ptr<ErrorHandlerFSListener> listener(
+      new ErrorHandlerFSListener());
+  Options options = GetDefaultOptions();
+  options.file_system.reset(fault_fs);
+  options.create_if_missing = true;
+  options.level0_file_num_compaction_trigger = 2;
+  options.listeners.emplace_back(listener);
+  Status s;
+  std::string old_manifest;
+  std::string new_manifest;
+  DestroyAndReopen(options);
+  old_manifest = GetManifestNameFromLiveFiles();
+
+  IOStatus error_msg = IOStatus::IOError("Retryable IO Error");
+  error_msg.SetRetryable(true);
+
+  Put(Key(0), "val");
+  Put(Key(2), "val");
+  s = Flush();
+  ASSERT_EQ(s, Status::OK());
+
+  listener->OverrideBGError(
+      Status(Status::NoSpace(), Status::Severity::kHardError));
+  listener->EnableAutoRecovery(false);
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+      "DBImpl::BackgroundCompaction:NonTrivial:AfterRun", [&](void*) {
+        fault_fs->SetFilesystemActive(false, error_msg);
+      });
+  rocksdb::SyncPoint::GetInstance()->EnableProcessing();
+
+  Put(Key(1), "val");
+  s = Flush();
+  ASSERT_EQ(s, Status::OK());
+
+  s = dbfull()->TEST_WaitForCompact();
+  ASSERT_EQ(s.severity(), rocksdb::Status::Severity::kHardError);
+
+  fault_fs->SetFilesystemActive(true);
+  s = dbfull()->Resume();
+  ASSERT_EQ(s, Status::OK());
+
+  new_manifest = GetManifestNameFromLiveFiles();
+  ASSERT_NE(new_manifest, old_manifest);
+
+  Reopen(options);
+  ASSERT_EQ("val", Get(Key(0)));
+  ASSERT_EQ("val", Get(Key(1)));
+  ASSERT_EQ("val", Get(Key(2)));
+  Close();
+}
+
 
 TEST_F(DBErrorHandlingFSTest, CompactionWriteError) {
   FaultInjectionTestFS* fault_fs =
