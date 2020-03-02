@@ -145,6 +145,8 @@ DBOptions BuildDBOptions(const ImmutableDBOptions& immutable_db_options,
       immutable_db_options.avoid_unnecessary_blocking_io;
   options.log_readahead_size = immutable_db_options.log_readahead_size;
   options.sst_file_checksum_func = immutable_db_options.sst_file_checksum_func;
+  options.max_bgerror_resume_count = immutable_db_options.max_bgerror_resume_count;
+  options.bgerror_resume_retry_interval = immutable_db_options.bgerror_resume_retry_interval;
   return options;
 }
 
@@ -1681,6 +1683,12 @@ std::unordered_map<std::string, OptionTypeInfo>
         {"log_readahead_size",
          {offsetof(struct DBOptions, log_readahead_size), OptionType::kSizeT,
           OptionVerificationType::kNormal, false, 0}},
+        {"max_bgerror_resume_count",
+         {offsetof(struct DBOptions, max_bgerror_resume_count),
+          OptionType::kInt, OptionVerificationType::kNormal, false, 0}},
+        {"bgerror_resume_retry_interval",
+         {offsetof(struct DBOptions, bgerror_resume_retry_interval),
+          OptionType::kUInt64T, OptionVerificationType::kNormal, false, 0}},
 };
 
 std::unordered_map<std::string, BlockBasedTableOptions::IndexType>

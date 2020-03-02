@@ -95,7 +95,9 @@ ImmutableDBOptions::ImmutableDBOptions(const DBOptions& options)
       persist_stats_to_disk(options.persist_stats_to_disk),
       write_dbid_to_manifest(options.write_dbid_to_manifest),
       log_readahead_size(options.log_readahead_size),
-      sst_file_checksum_func(options.sst_file_checksum_func) {
+      sst_file_checksum_func(options.sst_file_checksum_func),
+      max_bgerror_resume_count(options.max_bgerror_resume_count),
+      bgerror_resume_retry_interval(options.bgerror_resume_retry_interval) {
 }
 
 void ImmutableDBOptions::Dump(Logger* log) const {
@@ -250,6 +252,13 @@ void ImmutableDBOptions::Dump(Logger* log) const {
                    sst_file_checksum_func
                        ? sst_file_checksum_func->Name()
                        : kUnknownFileChecksumFuncName.c_str());
+  ROCKS_LOG_HEADER(log, "               Options.max_bgerror_resume_count: %d",
+                    max_bgerror_resume_count);
+  ROCKS_LOG_HEADER(log,
+                       "           Options.bgerror_resume_retry_interval: %" PRIu64,
+                   bgerror_resume_retry_interval);
+
+
 }
 
 MutableDBOptions::MutableDBOptions()
