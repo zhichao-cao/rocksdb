@@ -22,9 +22,11 @@ class ErrorHandler {
          db_options_(db_options),
          bg_error_(Status::OK()),
          recovery_error_(Status::OK()),
+         recovery_io_error_(IOStatus::OK()),
          db_mutex_(db_mutex),
          auto_recovery_(false),
-         recovery_in_prog_(false) {}
+         recovery_in_prog_(false),
+         bg_thread_(nullptr) {}
    ~ErrorHandler() {}
 
    void EnableAutoRecovery() { auto_recovery_ = true; }
@@ -66,13 +68,17 @@ class ErrorHandler {
     // A separate Status variable used to record any errors during the
     // recovery process from hard errors
     Status recovery_error_;
+    IOStatus recovery_io_error_;
     InstrumentedMutex* db_mutex_;
     // A flag indicating whether automatic recovery from errors is enabled
     bool auto_recovery_;
     bool recovery_in_prog_;
+    // Background error recovery thread
+    std::unique_ptr<port::Thread> bg_thread_;
 
     Status OverrideNoSpaceError(Status bg_error, bool* auto_recovery);
     void RecoverFromNoSpace();
+    void RecoverFromRetryableBGIOError();
 };
 
 }  // namespace ROCKSDB_NAMESPACE

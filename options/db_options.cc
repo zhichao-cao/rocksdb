@@ -253,12 +253,10 @@ void ImmutableDBOptions::Dump(Logger* log) const {
                        ? sst_file_checksum_func->Name()
                        : kUnknownFileChecksumFuncName.c_str());
   ROCKS_LOG_HEADER(log, "               Options.max_bgerror_resume_count: %d",
-                    max_bgerror_resume_count);
+                   max_bgerror_resume_count);
   ROCKS_LOG_HEADER(log,
-                       "           Options.bgerror_resume_retry_interval: %" PRIu64,
+                   "           Options.bgerror_resume_retry_interval: %" PRIu64,
                    bgerror_resume_retry_interval);
-
-
 }
 
 MutableDBOptions::MutableDBOptions()

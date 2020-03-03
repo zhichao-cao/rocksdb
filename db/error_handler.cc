@@ -244,16 +244,28 @@ Status ErrorHandler::SetBGError(const IOStatus& bg_io_err,
   if (bg_io_err.ok()) {
     return Status::OK();
   }
-  if (recovery_in_prog_ && recovery_error_.ok()) {
-    recovery_error_ = bg_io_err;
+  if (recovery_in_prog_ && recovery_io_error_.ok()) {
+    recovery_io_error_ = bg_io_err;
   }
   Status new_bg_io_err = bg_io_err;
   Status s;
+  bool auto_recovery = auto_recovery_;
   // First, check if the error is a retryable IO error or not.
   if (bg_io_err.GetRetryable()) {
-    // In current stage, treat retryable error as HardError.
+    // In current stage, we automatically try to recover from retryable
+    // bg error. At the same time, we set the error as hard error.
     Status bg_err(new_bg_io_err, Status::Severity::kHardError);
-    s = SetBGError(bg_err, reason);
+    bg_error_ = bg_err;
+    EventHelpers::NotifyOnBackgroundError(db_options_.listeners, reason,
+                                          &bg_err, db_mutex_, &auto_recovery);
+    if (bg_thread_) {
+      bg_thread_->join();
+    }
+    db_mutex_->Unlock();
+    bg_thread_.reset(
+        new port::Thread(&ErrorHandler::RecoverFromRetryableBGIOError, this));
+    db_mutex_->Lock();
+
   } else {
     s = SetBGError(new_bg_io_err, reason);
   }
@@ -363,4 +375,61 @@ Status ErrorHandler::RecoverFromBGError(bool is_manual) {
   return bg_error_;
 #endif
 }
+
+void ErrorHandler::RecoverFromRetryableBGIOError() {
+#ifndef ROCKSDB_LITE
+  db_mutex_->Lock();
+  if (recovery_in_prog_) {
+    db_mutex_->Unlock();
+    return;
+  }
+  recovery_in_prog_ = true;
+
+  // Recover from the retryable error. Create a separate thread to do it.
+  int resume_count = db_options_.max_bgerror_resume_count;
+  uint64_t wait_interval = db_options_.bgerror_resume_retry_interval;
+
+  while (resume_count > 0) {
+    recovery_io_error_ = IOStatus::OK();
+    recovery_error_ = Status::OK();
+    Status s = db_->ResumeImpl();
+    if (s.IsShutdownInProgress()) {
+      recovery_in_prog_ = false;
+      db_mutex_->Unlock();
+      return;
+    }
+    if (!recovery_io_error_.ok() && recovery_io_error_.GetRetryable()) {
+      db_mutex_->Unlock();
+      db_options_.env->SleepForMicroseconds(wait_interval);
+      db_mutex_->Lock();
+    } else {
+      // There are four possibility: 1) recover_io_error is set during resume
+      // and the error is not retryable, 2) recover is successful, 3) other
+      // error happens during resume and cannot be resumed here
+      if (recovery_io_error_.ok() && recovery_error_.ok() && s.ok()) {
+        // recover from the retryable IO error and no other BG errors. Clean
+        // the bg_error and notify user.
+        Status old_bg_error = bg_error_;
+        bg_error_ = Status::OK();
+        recovery_in_prog_ = false;
+        EventHelpers::NotifyOnErrorRecoveryCompleted(db_options_.listeners,
+                                                     old_bg_error, db_mutex_);
+        db_mutex_->Unlock();
+        return;
+      } else {
+        recovery_in_prog_ = false;
+        db_mutex_->Unlock();
+        return;
+      }
+    }
+    resume_count--;
+  }
+  recovery_in_prog_ = false;
+  db_mutex_->Unlock();
+  return;
+#else
+  return;
+#endif
+}
+
 }  // namespace ROCKSDB_NAMESPACE
