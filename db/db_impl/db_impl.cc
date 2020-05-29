@@ -4109,6 +4109,21 @@ Status DBImpl::IngestExternalFile(
   return IngestExternalFiles({arg});
 }
 
+Status DBImpl::IngestExternalFile(
+    ColumnFamilyHandle* column_family,
+    const std::vector<std::string>& external_files,
+    const std::vector<std::string>& files_checksum,
+    const std::vector<std::string>& files_checksum_func_name,
+    const IngestExternalFileOptions& ingestion_options) {
+  IngestExternalFileArg arg;
+  arg.column_family = column_family;
+  arg.external_files = external_files;
+  arg.options = ingestion_options;
+  arg.files_checksum = files_checksum;
+  arg.files_checksum_func_name = files_checksum_func_name;
+  return IngestExternalFiles({arg});
+}
+
 Status DBImpl::IngestExternalFiles(
     const std::vector<IngestExternalFileArg>& args) {
   if (args.empty()) {

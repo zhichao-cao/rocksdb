@@ -1387,6 +1387,57 @@ class DB {
     return IngestExternalFile(DefaultColumnFamily(), external_files, options);
   }
 
+  // IngestExternalFile() will load a list of external SST files with checksum
+  // (1) into the DB
+  // Two primary modes are supported:
+  // - Duplicate keys in the new files will overwrite exiting keys (default)
+  // - Duplicate keys will be skipped (set ingest_behind=true)
+  // In the first mode we will try to find the lowest possible level that
+  // the file can fit in, and ingest the file into this level
+  // (2) A file that
+  // have a key range that overlap with the memtable key range will require us
+  // to Flush the memtable first before ingesting the file.
+  // In the second mode we will always ingest in the bottom most level (see
+  // docs to IngestExternalFileOptions::ingest_behind).
+  // (3) Ingest the SST files with checksum and checksum function name:
+  // 1) if the DB does not enable SST file checksum factory
+  // (DBOptions::file_checksum_gen_factory == nullptr), then
+  // the files_checksum and files_checksum_func_name will not be checked; 2)
+  // If DB SST file checksum is enabled, it is OK that files_checksum and
+  // files_checksum_func_name vectors are both empty (ingest files without
+  // file checksum information); 3) If DB SST file checksum is enabled and
+  // both vectors is non-empty, the two vector size must be the same as the
+  // external_files and also the files_checksum_func_name must match the
+  // checksum function name being used in DB. otherwise, fail the ingestion.
+  // 4) if previous conditions are satisfied and also
+  // IngestExternalFileOptions::generate_and_verify_file_checksum is set to
+  // TRUE, DB will generatae the checksum for each ingested SST file and
+  // compare the checksum with the ingested checksum. Any mismatch will fail
+  // the ingestion.
+  //
+  // (1) External SST files can be created using SstFileWriter
+  // (2) We will try to ingest the files to the lowest possible level
+  //     even if the file compression doesn't match the level compression
+  // (3) If IngestExternalFileOptions->ingest_behind is set to true,
+  //     we always ingest at the bottommost level, which should be reserved
+  //     for this purpose (see DBOPtions::allow_ingest_behind flag).
+  virtual Status IngestExternalFile(
+      ColumnFamilyHandle* column_family,
+      const std::vector<std::string>& external_files,
+      const std::vector<std::string>& files_checksum,
+      const std::vector<std::string>& files_checksum_func_name,
+      const IngestExternalFileOptions& options) = 0;
+
+  virtual Status IngestExternalFile(
+      const std::vector<std::string>& external_files,
+      const std::vector<std::string>& files_checksum,
+      const std::vector<std::string>& files_checksum_func_name,
+      const IngestExternalFileOptions& options) {
+    return IngestExternalFile(DefaultColumnFamily(), external_files,
+                              files_checksum, files_checksum_func_name,
+                              options);
+  }
+
   // IngestExternalFiles() will ingest files for multiple column families, and
   // record the result atomically to the MANIFEST.
   // If this function returns OK, all column families' ingestion must succeed.
