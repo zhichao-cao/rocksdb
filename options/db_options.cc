@@ -136,6 +136,7 @@ static std::unordered_map<std::string, OptionTypeInfo>
           std::shared_ptr<Statistics> statistics;
           std::vector<DbPath> db_paths;
           std::vector<std::shared_ptr<EventListener>> listeners;
+          std::vector<FileType> checksum_handoff_file_types;
          */
         {"advise_random_on_open",
          {offsetof(struct ImmutableDBOptions, advise_random_on_open),
@@ -569,7 +570,8 @@ ImmutableDBOptions::ImmutableDBOptions(const DBOptions& options)
       best_efforts_recovery(options.best_efforts_recovery),
       max_bgerror_resume_count(options.max_bgerror_resume_count),
       bgerror_resume_retry_interval(options.bgerror_resume_retry_interval),
-      allow_data_in_errors(options.allow_data_in_errors) {
+      allow_data_in_errors(options.allow_data_in_errors),
+      checksum_handoff_file_types(options.checksum_handoff_file_types){
 }
 
 void ImmutableDBOptions::Dump(Logger* log) const {
