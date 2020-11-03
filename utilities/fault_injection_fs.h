@@ -294,6 +294,7 @@ class FaultInjectionTestFS : public FileSystemWrapper {
   enum ErrorOperation : char {
     kRead = 0,
     kOpen,
+    kWrite,
   };
 
   // Set thread-local parameters for error injection. The first argument,
@@ -308,7 +309,26 @@ class FaultInjectionTestFS : public FileSystemWrapper {
       thread_local_error_->Reset(ctx);
     }
     ctx->one_in = one_in;
+    ctx->error_limit = INT_MAX;
     ctx->count = 0;
+  }
+
+  // Set thread-local parameters for error injection. The first argument,
+  // seed is the seed for the random number generator, and one_in determines
+  // the probability of injecting error (i.e an error is injected with
+  // 1/one_in probability)
+  void SetThreadLocalWriteRetryableErrorContext(uint32_t seed, int one_in,
+                            int error_limit = INT_MAX) {
+    struct ErrorContext* ctx =
+          static_cast<struct ErrorContext*>(thread_local_error_->Get());
+    if (ctx == nullptr) {
+      ctx = new ErrorContext(seed);
+      thread_local_error_->Reset(ctx);
+    }
+    ctx->one_in = one_in;
+    ctx->error_limit = error_limit;
+    ctx->count = 0;
+    ctx->type = ErrorType::kErrorTypeStatusRetryable;
   }
 
   static void DeleteThreadLocalErrorContext(void *p) {
@@ -371,6 +391,7 @@ class FaultInjectionTestFS : public FileSystemWrapper {
     kErrorTypeStatus = 0,
     kErrorTypeCorruption,
     kErrorTypeTruncated,
+    kErrorTypeStatusRetryable,
     kErrorTypeMax
   };
 
@@ -378,6 +399,7 @@ class FaultInjectionTestFS : public FileSystemWrapper {
     Random rand;
     int one_in;
     int count;
+    int error_limit;      // decide at most how many error should be injested
     bool enable_error_injection;
     void* callstack;
     int frames;

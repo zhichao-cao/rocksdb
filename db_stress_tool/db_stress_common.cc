@@ -19,7 +19,8 @@
 ROCKSDB_NAMESPACE::DbStressEnvWrapper* db_stress_env = nullptr;
 #ifndef NDEBUG
 // If non-null, injects read error at a rate specified by the
-// read_fault_one_in flag
+// read_fault_one_in flag, or ingects write error for background work
+// (flush and compaction)
 std::shared_ptr<ROCKSDB_NAMESPACE::FaultInjectionTestFS> fault_fs_guard;
 #endif // NDEBUG
 enum ROCKSDB_NAMESPACE::CompressionType compression_type_e =

@@ -99,7 +99,9 @@ IOStatus TestFSWritableFile::Append(const Slice& data, const IOOptions&,
   state_.buffer_.append(data.data(), data.size());
   state_.pos_ += data.size();
   fs_->WritableFileAppended(state_);
-  return IOStatus::OK();
+  IOStatus io_s = fs_->InjectError(FaultInjectionTestFS::ErrorOperation::kWrite,
+                                  nullptr, false, nullptr);
+  return io_s;
 }
 
 IOStatus TestFSWritableFile::Close(const IOOptions& options,
@@ -465,12 +467,14 @@ IOStatus FaultInjectionTestFS::InjectError(ErrorOperation op,
                                            char* scratch) {
   ErrorContext* ctx =
         static_cast<ErrorContext*>(thread_local_error_->Get());
-  if (ctx == nullptr || !ctx->enable_error_injection || !ctx->one_in) {
+  if (ctx == nullptr || !ctx->enable_error_injection || !ctx->one_in
+        || ctx->error_limit == 0) {
     return IOStatus::OK();
   }
 
   if (ctx->rand.OneIn(ctx->one_in)) {
     ctx->count++;
+    ctx->error_limit--;
     if (ctx->callstack) {
       free(ctx->callstack);
     }
@@ -529,6 +533,25 @@ IOStatus FaultInjectionTestFS::InjectError(ErrorOperation op,
       }
       case kOpen:
         return IOStatus::IOError();
+      case kWrite:
+      {
+        switch (ctx->type) {
+          // Inject IO error
+          case ErrorType::kErrorTypeStatus:
+            return IOStatus::IOError();
+          // Inject random corruption
+          case ErrorType::kErrorTypeCorruption:
+            return IOStatus::Corruption();
+          case ErrorType::kErrorTypeStatusRetryable:
+          {
+              IOStatus error_msg = IOStatus::IOError("Retryable IO Error");
+              error_msg.SetRetryable(true);
+              return error_msg;
+          }
+          default:
+            return IOStatus::OK();
+        }
+      }
       default:
         assert(false);
     }

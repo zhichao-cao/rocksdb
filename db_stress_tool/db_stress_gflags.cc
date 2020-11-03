@@ -754,4 +754,8 @@ DEFINE_string(file_checksum_impl, "none",
               "Name of an implementation for file_checksum_gen_factory, or "
               "\"none\" for null.");
 
+DEFINE_int32(bg_write_fault_one_in, 1000,
+            "On non-zero, enables fault injection on background writes "
+            "(flush and compaction writes)");
+
 #endif  // GFLAGS

@@ -522,6 +522,23 @@ void StressTest::OperateDb(ThreadState* thread) {
     fault_fs_guard->SetThreadLocalReadErrorContext(thread->shared->GetSeed(),
                                             FLAGS_read_fault_one_in);
   }
+  if (FLAGS_bg_write_fault_one_in) {
+    fault_fs_guard->SetThreadLocalWriteRetryableErrorContext(thread->shared->GetSeed(),
+                                            FLAGS_bg_write_fault_one_in);
+    SyncPoint::GetInstance()->SetCallBack(
+        "BuildTable:BeforeFinishBuildTable",
+        [&](void*) { fault_fs_guard->EnableErrorInjection(); });
+    SyncPoint::GetInstance()->SetCallBack(
+        "BuildTable:BeforeCloseTableFile",
+        [&](void*) { fault_fs_guard->DisableErrorInjection(); });
+    SyncPoint::GetInstance()->SetCallBack(
+        "BackgroundCallCompaction:0",
+        [&](void*) { fault_fs_guard->EnableErrorInjection(); });
+    SyncPoint::GetInstance()->SetCallBack(
+        "DBImpl::BackgroundCallCompaction:FoundObsoleteFiles",
+        [&](void*) { fault_fs_guard->DisableErrorInjection(); });
+    SyncPoint::GetInstance()->EnableProcessing();
+  }
 #endif // NDEBUG
   thread->stats.Start();
   for (int open_cnt = 0; open_cnt <= FLAGS_reopen; ++open_cnt) {
@@ -790,6 +807,12 @@ void StressTest::OperateDb(ThreadState* thread) {
     delete thread->snapshot_queue.front().second.key_vec;
     thread->snapshot_queue.pop();
   }
+#ifndef NDEBUG
+  if (FLAGS_bg_write_fault_one_in) {
+      SyncPoint::GetInstance()->ClearAllCallBacks();
+      SyncPoint::GetInstance()->DisableProcessing();
+  }
+#endif // NDEBUG
 
   thread->stats.Stop();
 }
@@ -1952,6 +1975,8 @@ void StressTest::PrintEnv() const {
   fprintf(stdout, "Sync fault injection      : %d\n", FLAGS_sync_fault_injection);
   fprintf(stdout, "Best efforts recovery     : %d\n",
           static_cast<int>(FLAGS_best_efforts_recovery));
+  fprintf(stdout, "Background write fault one in         : %d\n",
+          FLAGS_bg_write_fault_one_in);
 
   fprintf(stdout, "------------------------------------------------\n");
 }
