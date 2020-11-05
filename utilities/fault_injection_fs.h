@@ -311,6 +311,27 @@ class FaultInjectionTestFS : public FileSystemWrapper {
     ctx->count = 0;
   }
 
+  // Set thread-local parameters for write error injection. The seed
+  // is the seed for the random number generator, and one_in determines
+  // the probability of injecting error (i.e an error is injected with
+  // 1/one_in probability). If both write and read error are enabled,
+  // they share the same seed.
+  void SetThreadLocalWriteErrorContext(uint32_t seed, int one_in,
+                                      bool is_retryable) {
+    struct ErrorContext* ctx =
+          static_cast<struct ErrorContext*>(thread_local_error_->Get());
+    if (ctx == nullptr) {
+      ctx = new ErrorContext(seed);
+      thread_local_error_->Reset(ctx);
+    }
+    ctx->write_one_in = one_in;
+    if (is_retryable) {
+      ctx->write_error_type = ErrorType::kErrorTypeStatusRetryable;
+    } else {
+      ctx->write_error_type = ErrorType::kErrorTypeStatus;
+    }
+  }
+
   static void DeleteThreadLocalErrorContext(void *p) {
     ErrorContext* ctx = static_cast<ErrorContext*>(p);
     delete ctx;
@@ -322,6 +343,9 @@ class FaultInjectionTestFS : public FileSystemWrapper {
   // its always an IOError.
   IOStatus InjectError(ErrorOperation op, Slice* slice,
                        bool direct_io, char* scratch);
+
+  // Inject an wrie error, the error type is based on the type set before
+  IOStatus InjectWriteError();
 
   // Get the count of how many times we injected since the previous call
   int GetAndResetErrorCount() {
@@ -343,11 +367,27 @@ class FaultInjectionTestFS : public FileSystemWrapper {
     }
   }
 
+  void EnableWriteErrorInjection() {
+    ErrorContext* ctx =
+          static_cast<ErrorContext*>(thread_local_error_->Get());
+    if (ctx) {
+      ctx->enable_write_error_injection = true;
+    }
+  }
+
   void DisableErrorInjection() {
     ErrorContext* ctx =
           static_cast<ErrorContext*>(thread_local_error_->Get());
     if (ctx) {
       ctx->enable_error_injection = false;
+    }
+  }
+
+  void DisableWriteErrorInjection() {
+    ErrorContext* ctx =
+          static_cast<ErrorContext*>(thread_local_error_->Get());
+    if (ctx) {
+      ctx->enable_write_error_injection = false;
     }
   }
 
@@ -371,21 +411,26 @@ class FaultInjectionTestFS : public FileSystemWrapper {
     kErrorTypeStatus = 0,
     kErrorTypeCorruption,
     kErrorTypeTruncated,
+    kErrorTypeStatusRetryable,
     kErrorTypeMax
   };
 
   struct ErrorContext {
     Random rand;
     int one_in;
+    int write_one_in;
     int count;
     bool enable_error_injection;
+    bool enable_write_error_injection;
     void* callstack;
     int frames;
     ErrorType type;
+    ErrorType write_error_type;
 
     explicit ErrorContext(uint32_t seed)
         : rand(seed),
           enable_error_injection(false),
+          enable_write_error_injection(false),
           callstack(nullptr),
           frames(0) {}
     ~ErrorContext() {

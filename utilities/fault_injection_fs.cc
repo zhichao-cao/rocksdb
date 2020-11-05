@@ -536,6 +536,35 @@ IOStatus FaultInjectionTestFS::InjectError(ErrorOperation op,
   return IOStatus::OK();
 }
 
+IOStatus FaultInjectionTestFS::InjectWriteError() {
+  ErrorContext* ctx =
+      static_cast<ErrorContext*>(thread_local_error_->Get());
+  if (ctx == nullptr || !ctx->enable_write_error_injection
+      || !ctx->write_one_in) {
+    return IOStatus::OK();
+  }
+
+  if (ctx->rand.OneIn(ctx->write_one_in)) {
+    if (ctx->callstack) {
+      free(ctx->callstack);
+    }
+    ctx->callstack = port::SaveStack(&ctx->frames);
+    switch(ctx->write_error_type) {
+      case ErrorType::kErrorTypeStatus:
+        return IOStatus::IOError();
+      case ErrorType::kErrorTypeStatusRetryable:
+      {
+        IOStatus error_msg = IOStatus::IOError("Retryable IO Error");
+        error_msg.SetRetryable(true);
+        return error_msg;
+      }
+      default:
+        assert(false);
+    }
+  }
+  return IOStatus::OK();
+}
+
 void FaultInjectionTestFS::PrintFaultBacktrace() {
 #if defined(OS_LINUX)
   ErrorContext* ctx =
