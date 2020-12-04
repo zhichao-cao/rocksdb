@@ -437,6 +437,17 @@ void DBImpl::WaitForBackgroundWork() {
   // Wait for background work to finish
   while (bg_bottom_compaction_scheduled_ || bg_compaction_scheduled_ ||
          bg_flush_scheduled_) {
+    if (bg_bottom_compaction_scheduled_) {
+      fprintf(stdout,"wait for bg work cannot resume: bottom_compaction_scheduled\n");
+    }
+    if (bg_compaction_scheduled_) {
+      fprintf(stdout,"wait for bg work cannot resume :compaction_scheduled_\n");
+    }
+
+    if (bg_flush_scheduled_) {
+      fprintf(stdout,"wait for bg work cannot resume: flush_scheduled_\n");
+    }
+    fprintf(stdout,"gooooooo to wait and sleep\n");
     bg_cv_.Wait();
   }
 }

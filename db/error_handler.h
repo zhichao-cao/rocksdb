@@ -40,7 +40,8 @@ class ErrorHandler {
          db_mutex_(db_mutex),
          auto_recovery_(false),
          recovery_in_prog_(false),
-         soft_error_no_bg_work_(false) {}
+         soft_error_no_bg_work_(false),
+         recovery_in_wait_(false) {}
    ~ErrorHandler() {
      bg_error_.PermitUncheckedError();
      recovery_error_.PermitUncheckedError();
@@ -83,6 +84,24 @@ class ErrorHandler {
 
     void EndAutoRecovery();
 
+    void SetRecoveryWait() {
+      db_mutex_->AssertHeld();
+      assert(recovery_in_prog_);
+      fprintf(stdout,"set wait flag\n");
+      recovery_in_wait_ = true;
+    }
+
+    void SetRecoveryContinue() {
+      db_mutex_->AssertHeld();
+      assert(recovery_in_prog_);
+      fprintf(stdout,"release wait flag\n");
+      recovery_in_wait_ = false;
+    }
+
+    bool IsRecoveryInWait() {
+      return recovery_in_wait_;
+    }
+
    private:
     DBImpl* db_;
     const ImmutableDBOptions& db_options_;
@@ -114,6 +133,7 @@ class ErrorHandler {
     void RecoverFromNoSpace();
     Status StartRecoverFromRetryableBGIOError(IOStatus io_error);
     void RecoverFromRetryableBGIOError();
+    bool recovery_in_wait_;
 };
 
 }  // namespace ROCKSDB_NAMESPACE

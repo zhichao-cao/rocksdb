@@ -1727,7 +1727,7 @@ Status DBImpl::FlushMemTable(ColumnFamilyData* cfd,
       if (flush_reason != FlushReason::kErrorRecoveryRetryFlush) {
         s = SwitchMemtable(cfd, &context);
       } else {
-        assert(cfd->imm()->NumNotFlushed() > 0);
+        //assert(cfd->imm()->NumNotFlushed() > 0);
       }
     }
     if (s.ok()) {
@@ -2101,7 +2101,8 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
     // we paused the background work
     return;
   } else if (error_handler_.IsBGWorkStopped() &&
-             !error_handler_.IsRecoveryInProgress()) {
+             (!error_handler_.IsRecoveryInProgress() ||
+             (error_handler_.IsRecoveryInProgress() && error_handler_.IsRecoveryInWait()))) {
     // There has been a hard error and this call is not part of the recovery
     // sequence. Bail out here so we don't get into an endless loop of
     // scheduling BG work which will again call this function
@@ -2440,7 +2441,7 @@ void DBImpl::BackgroundCallFlush(Env::Priority thread_pri) {
 
     Status s = BackgroundFlush(&made_progress, &job_context, &log_buffer,
                                &reason, thread_pri);
-    if (!s.ok() && !s.IsShutdownInProgress() && !s.IsColumnFamilyDropped() &&
+   if (!s.ok() && !s.IsShutdownInProgress() && !s.IsColumnFamilyDropped() &&
         reason != FlushReason::kErrorRecovery) {
       // Wait a little bit before retrying background flush in
       // case this is an environmental problem and we do not want to
@@ -2459,6 +2460,7 @@ void DBImpl::BackgroundCallFlush(Env::Priority thread_pri) {
       env_->SleepForMicroseconds(1000000);
       mutex_.Lock();
     }
+
 
     TEST_SYNC_POINT("DBImpl::BackgroundCallFlush:FlushFinish:0");
     ReleaseFileNumberFromPendingOutputs(pending_outputs_inserted_elem);

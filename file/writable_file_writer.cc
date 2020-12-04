@@ -408,6 +408,13 @@ IOStatus WritableFileWriter::WriteBuffered(const char* data, size_t size) {
         auto prev_perf_level = GetPerfLevel();
         IOSTATS_CPU_TIMER_GUARD(cpu_write_nanos, env_);
         s = writable_file_->Append(Slice(src, allowed), IOOptions(), nullptr);
+        if (!s.ok()) {
+          if (s.GetRetryable()) {
+            fprintf(stdout, "retryable io error in writable\n");
+          } else {
+            fprintf(stdout, "regular io error in writable\n");
+          }
+        }
         SetPerfLevel(prev_perf_level);
       }
 #ifndef ROCKSDB_LITE

@@ -100,6 +100,14 @@ IOStatus TestFSWritableFile::Append(const Slice& data, const IOOptions&,
   state_.pos_ += data.size();
   fs_->WritableFileAppended(state_);
   IOStatus io_s = fs_->InjectWriteError(state_.filename_);
+  if (!io_s.ok()) {
+    if (io_s.GetRetryable()) {
+      fprintf(stdout, "retryable io error in FS append\n");
+    } else {
+      fprintf(stdout, "regular io error in FS append\n");
+    }
+  }
+
   return io_s;
 }
 
@@ -545,18 +553,21 @@ IOStatus FaultInjectionTestFS::InjectWriteError(const std::string& file_name) {
   bool allowed_type = false;
 
   uint64_t number;
-  FileType c_type;
-  if (ParseFileName(file_name, &number, &c_type)) {
+  FileType c_type = kTempFile;
+  std::size_t found = file_name.find_last_of("/");
+  std::string file = file_name.substr(found);
+  fprintf(stdout, "file name:%s\n", file.c_str());
+  bool r = ParseFileName(file, &number, &c_type);
+  if (r) {
     for (const auto& type : write_error_allowed_types_) {
       if (c_type == type) {
         allowed_type = true;
       }
     }
   }
-
   if (allowed_type) {
     if (write_error_rand_.OneIn(write_error_one_in_)) {
-      return error_;
+      return GetError();
     }
   }
   return IOStatus::OK();

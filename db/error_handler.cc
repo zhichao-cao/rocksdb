@@ -249,6 +249,8 @@ Status ErrorHandler::SetBGError(const Status& bg_err, BackgroundErrorReason reas
   if (bg_err.ok()) {
     return Status::OK();
   }
+  int ttt = static_cast<int>(reason);
+  fprintf(stdout, "set error reason: %d\n", ttt);
 
   bool paranoid = db_options_.paranoid_checks;
   Status::Severity sev = Status::Severity::kFatalError;
@@ -330,6 +332,11 @@ Status ErrorHandler::SetBGError(const IOStatus& bg_io_err,
   if (bg_io_err.ok()) {
     return Status::OK();
   }
+  if (bg_io_err.GetRetryable()) {
+    fprintf(stdout, "retyrable io error in SetBGError\n");
+  } else {
+    fprintf(stdout, "regular io error\n");
+  }
   ROCKS_LOG_WARN(db_options_.info_log, "Background IO error %s",
                  bg_io_err.ToString().c_str());
 
@@ -367,6 +374,8 @@ Status ErrorHandler::SetBGError(const IOStatus& bg_io_err,
     bool auto_recovery = false;
     EventHelpers::NotifyOnBackgroundError(db_options_.listeners, reason, &s,
                                           db_mutex_, &auto_recovery);
+    int ttt = static_cast<int>(reason);
+    fprintf(stdout, "set io error reason: %d\n", ttt);
     if (BackgroundErrorReason::kCompaction == reason) {
       Status bg_err(new_bg_io_err, Status::Severity::kSoftError);
       if (bg_err.severity() > bg_error_.severity()) {
@@ -543,11 +552,21 @@ Status ErrorHandler::StartRecoverFromRetryableBGIOError(IOStatus io_error) {
   if (bg_error_.ok() || io_error.ok()) {
     return Status::OK();
   }
-  if (db_options_.max_bgerror_resume_count <= 0 || recovery_in_prog_ ||
-      recovery_thread_) {
+  if (db_options_.max_bgerror_resume_count <= 0 || recovery_in_prog_) {
+    if (recovery_in_prog_) {
+      fprintf(stdout, "************* recovery_in_prog_\n");
+    }
     // Auto resume BG error is not enabled, directly return bg_error_.
     return bg_error_;
   }
+  if (recovery_thread_) {
+    fprintf(stdout, "************** recover thread is running\n");
+    db_mutex_->Unlock();
+    recovery_thread_->join();
+    db_mutex_->Lock();
+  }
+
+  fprintf(stdout, "************* start auto resume thread\n");
 
   recovery_in_prog_ = true;
   recovery_thread_.reset(
@@ -575,6 +594,7 @@ void ErrorHandler::RecoverFromRetryableBGIOError() {
   if (end_recovery_) {
     return;
   }
+  fprintf(stdout, "***********in recovery thread\n");
   DBRecoverContext context = recover_context_;
   int resume_count = db_options_.max_bgerror_resume_count;
   uint64_t wait_interval = db_options_.bgerror_resume_retry_interval;
@@ -587,7 +607,9 @@ void ErrorHandler::RecoverFromRetryableBGIOError() {
     TEST_SYNC_POINT("RecoverFromRetryableBGIOError:BeforeResume1");
     recovery_io_error_ = IOStatus::OK();
     recovery_error_ = Status::OK();
+    fprintf(stdout, "************before call resume impl\n");
     Status s = db_->ResumeImpl(context);
+    fprintf(stdout, "************after called db resumeImpl: %s\n", s.ToString().c_str());
     TEST_SYNC_POINT("RecoverFromRetryableBGIOError:AfterResume0");
     TEST_SYNC_POINT("RecoverFromRetryableBGIOError:AfterResume1");
     if (s.IsShutdownInProgress() ||
@@ -607,6 +629,7 @@ void ErrorHandler::RecoverFromRetryableBGIOError() {
       TEST_SYNC_POINT("RecoverFromRetryableBGIOError:BeforeWait0");
       TEST_SYNC_POINT("RecoverFromRetryableBGIOError:BeforeWait1");
       int64_t wait_until = db_->env_->NowMicros() + wait_interval;
+      fprintf(stdout, "*****retryable recover io error!!!\n");
       cv_.TimedWait(wait_until);
       TEST_SYNC_POINT("RecoverFromRetryableBGIOError:AfterWait0");
     } else {
@@ -625,11 +648,13 @@ void ErrorHandler::RecoverFromRetryableBGIOError() {
         if (soft_error_no_bg_work_) {
           soft_error_no_bg_work_ = false;
         }
+        fprintf(stdout, "*************Recover is sucesssfull!\n");
         return;
       } else {
         TEST_SYNC_POINT("RecoverFromRetryableBGIOError:RecoverFail1");
         // In this case: 1) recovery_io_error is more serious or not retryable
         // 2) other Non IO recovery_error happens. The auto recovery stops.
+        fprintf(stdout, "*************** other io error, do not recover\n");
         recovery_in_prog_ = false;
         return;
       }
@@ -637,6 +662,7 @@ void ErrorHandler::RecoverFromRetryableBGIOError() {
     resume_count--;
   }
   recovery_in_prog_ = false;
+  fprintf(stdout, "************* use up all the recover count\n");
   TEST_SYNC_POINT("RecoverFromRetryableBGIOError:LoopOut");
   return;
 #else

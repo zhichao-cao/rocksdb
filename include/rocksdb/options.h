@@ -1173,7 +1173,7 @@ struct DBOptions {
   // previous resume fails and satisfy redo resume conditions.
   //
   // Default: 1000000 (microseconds).
-  uint64_t bgerror_resume_retry_interval = 1000000;
+  uint64_t bgerror_resume_retry_interval = 10;
 
   // It allows user to opt-in to get error messages containing corrupted
   // keys/values. Corrupt keys, values will be logged in the

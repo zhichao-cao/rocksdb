@@ -233,6 +233,10 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
     PERF_TIMER_STOP(write_pre_and_post_process_time);
 
     status = PreprocessWrite(write_options, &need_log_sync, &write_context);
+    if (!status.ok()) {
+      fprintf(stdout,"preprocesswrite failed: %s\n", status.ToString().c_str());
+    }
+
     if (!two_write_queues_) {
       // Assign it after ::PreprocessWrite since the sequence might advance
       // inside it by WriteRecoverableState
@@ -343,6 +347,10 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
       }
     }
     status = io_s;
+    if (!status.ok()) {
+      fprintf(stdout,"after write to wal failed: %s\n", status.ToString().c_str());
+    }
+
     assert(last_sequence != kMaxSequenceNumber);
     const SequenceNumber current_sequence = last_sequence + 1;
     last_sequence += seq_inc;
@@ -377,6 +385,11 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
         }
       }
     }
+
+    if (!status.ok()) {
+      fprintf(stdout,"after write call back failed: %s\n", status.ToString().c_str());
+    }
+
 
     if (status.ok()) {
       PERF_TIMER_GUARD(write_memtable_time);
@@ -905,9 +918,11 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
   mutex_.AssertHeld();
   assert(write_context != nullptr && need_log_sync != nullptr);
   Status status;
+  uint64_t x = env_->NowNanos();
 
   if (error_handler_.IsDBStopped()) {
     status = error_handler_.GetBGError();
+    fprintf(stdout,"db stopped due to hard error\n");
   }
 
   PERF_TIMER_GUARD(write_scheduling_flushes_compactions_time);
@@ -918,6 +933,10 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
                total_log_size_ > GetMaxTotalWalSize())) {
     WaitForPendingWrites();
     status = SwitchWAL(write_context);
+    if (!status.ok()) {
+      fprintf(stdout,"SwitchWAL failed: %s\n", status.ToString().c_str());
+    }
+
   }
 
   if (UNLIKELY(status.ok() && write_buffer_manager_->ShouldFlush())) {
@@ -928,6 +947,7 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
     // suboptimal but still correct.
     WaitForPendingWrites();
     status = HandleWriteBufferFull(write_context);
+    fprintf(stdout,"handle buffer full is needed %" PRId64 "\n", x);
   }
 
   if (UNLIKELY(status.ok() && !trim_history_scheduler_.Empty())) {
@@ -937,6 +957,10 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
   if (UNLIKELY(status.ok() && !flush_scheduler_.Empty())) {
     WaitForPendingWrites();
     status = ScheduleFlushes(write_context);
+    if (!status.ok()) {
+      fprintf(stdout,"ScheduleFlushes failed: %s\n", status.ToString().c_str());
+    }
+
   }
 
   PERF_TIMER_STOP(write_scheduling_flushes_compactions_time);
@@ -952,6 +976,10 @@ Status DBImpl::PreprocessWrite(const WriteOptions& write_options,
     // Can optimize it if it is an issue.
     status = DelayWrite(last_batch_group_size_, write_options);
     PERF_TIMER_START(write_pre_and_post_process_time);
+    if (!status.ok()) {
+  fprintf(stdout,"DelayWrite failed: %s\n", status.ToString().c_str());
+}
+  fprintf(stdout,"DelayWrite failed %" PRId64 "\n", x);
   }
 
   if (status.ok() && *need_log_sync) {
