@@ -273,9 +273,8 @@ const Status& ErrorHandler::SetBGError(const Status& bg_err,
   if (bg_err.ok()) {
     return bg_err;
   }
-  fprintf(stdout,"get in to fatal error: %s\n", bg_err.ToString().c_str());
-  assert(bg_err.ok());
   bool paranoid = db_options_.paranoid_checks;
+
   Status::Severity sev = Status::Severity::kFatalError;
   Status new_bg_err;
   DBRecoverContext context;
@@ -453,11 +452,9 @@ const Status& ErrorHandler::SetBGError(const IOStatus& bg_io_err,
         bg_error_ = bg_err;
       }
       recover_context_ = context;
-      fprintf(stdout,"get in to hard error: %s\n", bg_error_.ToString().c_str());
       return StartRecoverFromRetryableBGIOError(bg_io_err);
     }
   } else {
-    fprintf(stdout,"get in to fatal error: %s\n", new_bg_io_err.ToString().c_str());
     return SetBGError(new_bg_io_err, reason);
   }
 }
@@ -573,7 +570,6 @@ Status ErrorHandler::RecoverFromBGError(bool is_manual) {
   // can generate background errors should be the flush operations
   recovery_error_ = Status::OK();
   recovery_error_.PermitUncheckedError();
-  fprintf(stdout,"call resume \n");
   Status s = db_->ResumeImpl(recover_context_);
   if (s.ok()) {
     soft_error_no_bg_work_ = false;
