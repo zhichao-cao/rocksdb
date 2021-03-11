@@ -171,6 +171,7 @@ Status DBImpl::FlushMemTableToOutputFile(
 
   Status s;
   bool pick_status = false;
+  bool exec_status = false;
   IOStatus log_io_s = IOStatus::OK();
   if (logfile_number_ > 0 &&
       versions_->GetColumnFamilySet()->NumberOfColumnFamilies() > 1) {
@@ -207,9 +208,10 @@ Status DBImpl::FlushMemTableToOutputFile(
   // is unlocked by the current thread.
   if (s.ok()) {
     s = flush_job.Run(&logs_with_prep_tracker_, &file_meta);
+    exec_status = true;
   }
 
-  if (!s.ok() && pick_status) {
+  if (!s.ok() && pick_status && !exec_status) {
     flush_job.Cancel();
   }
   IOStatus io_s = IOStatus::OK();
@@ -1790,7 +1792,6 @@ Status DBImpl::FlushMemTable(ColumnFamilyData* cfd,
   // This method should not be called if atomic_flush is true.
   assert(!immutable_db_options_.atomic_flush);
   Status s;
-  clock_->SleepForMicroseconds(1000000);
   if (!flush_options.allow_write_stall) {
     bool flush_needed = true;
     s = WaitUntilFlushWouldNotStallWrites(cfd, &flush_needed);
@@ -1867,6 +1868,7 @@ Status DBImpl::FlushMemTable(ColumnFamilyData* cfd,
         }
       }
     }
+
     if (s.ok() && !flush_reqs.empty()) {
       for (const auto& req : flush_reqs) {
         assert(req.size() == 1);
@@ -1912,7 +1914,6 @@ Status DBImpl::FlushMemTable(ColumnFamilyData* cfd,
         cfds, flush_memtable_ids,
         (flush_reason == FlushReason::kErrorRecovery ||
          flush_reason == FlushReason::kErrorRecoveryRetryFlush));
-
     InstrumentedMutexLock lock_guard(&mutex_);
     for (auto* tmp_cfd : cfds) {
       tmp_cfd->UnrefAndTryDelete();
@@ -2573,6 +2574,7 @@ void DBImpl::BackgroundCallFlush(Env::Priority thread_pri) {
         pending_outputs_inserted_elem(new std::list<uint64_t>::iterator(
             CaptureCurrentFileNumberInPendingOutputs()));
     FlushReason reason;
+
     Status s = BackgroundFlush(&made_progress, &job_context, &log_buffer,
                                &reason, thread_pri);
     if (!s.ok() && !s.IsShutdownInProgress() && !s.IsColumnFamilyDropped() &&

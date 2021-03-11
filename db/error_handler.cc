@@ -273,8 +273,8 @@ const Status& ErrorHandler::SetBGError(const Status& bg_err,
   if (bg_err.ok()) {
     return bg_err;
   }
-  bool paranoid = db_options_.paranoid_checks;
 
+  bool paranoid = db_options_.paranoid_checks;
   Status::Severity sev = Status::Severity::kFatalError;
   Status new_bg_err;
   DBRecoverContext context;
